@@ -6,7 +6,6 @@ import {
   Loader2, WifiOff
 } from "lucide-react";
 
-// ─── Thème Évolution de Morteau ───────────────────────────────────────────────
 const EVO_BLUE      = "#003B8E";
 const EVO_BLUE_DARK = "#002870";
 const EVO_BLUE_LIGHT= "#E8F0FB";
@@ -24,7 +23,6 @@ function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const S = {
   app:        { minHeight:"100vh", background:"#F4F6FB", fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#1a1a2e" },
   header:     { background:EVO_BLUE, padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between", height:60, boxShadow:"0 2px 12px rgba(0,59,142,0.3)" },
@@ -56,7 +54,6 @@ const S = {
   iconBtn: c  => ({ width:32, height:32, borderRadius:8, border:`1.5px solid ${c}20`, background:`${c}10`, color:c, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }),
 };
 
-// ─── Composant principal ──────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab]                   = useState("caisse");
   const [products, setProducts]         = useState([]);
@@ -64,35 +61,22 @@ export default function App() {
   const [loading, setLoading]           = useState(true);
   const [dbError, setDbError]           = useState(false);
 
-  // Caisse
   const [cart, setCart]                 = useState([]);
   const [selectedCat, setSelectedCat]  = useState("Tous");
   const [amountGiven, setAmountGiven]   = useState(0);
-  const [encaisseStep, setEncaisseStep] = useState("saisie"); // "saisie" | "confirmation"
+  const [encaisseStep, setEncaisseStep] = useState("saisie");
 
-  // Paramètres
   const [editingProduct, setEditingProduct] = useState(null);
   const [newProduct, setNewProduct]         = useState({ name:"", price:"", category:"Restauration", emoji:"🛒" });
   const [showAddForm, setShowAddForm]       = useState(false);
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
   const [saving, setSaving]                 = useState(false);
 
-  // ── Chargement initial ───────────────────────────────────────────────────────
   useEffect(() => {
     Promise.all([loadProducts(), loadTransactions()])
       .finally(() => setLoading(false));
   }, []);
 
-  // ── Realtime : produits ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const channel = supabase
-      .channel("products-changes")
-      .on("postgres_changes", { event:"*", schema:"public", table:"products" }, () => loadProducts())
-      .subscribe();
-    return () => supabase.removeChannel(channel);
-  }, []);
-
-  // ── Realtime : transactions ──────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel("transactions-changes")
@@ -115,14 +99,12 @@ export default function App() {
     setTransactions(data);
   }
 
-  // ── Dérivés caisse ───────────────────────────────────────────────────────────
   const categories   = ["Tous", ...Array.from(new Set(products.map(p => p.category)))];
   const filtered     = selectedCat === "Tous" ? products : products.filter(p => p.category === selectedCat);
   const cartTotal    = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const change       = amountGiven - cartTotal;
   const canEncaisser = cart.length > 0 && amountGiven >= cartTotal;
 
-  // ── Actions panier ───────────────────────────────────────────────────────────
   function addToCart(p) {
     setCart(prev => {
       const ex = prev.find(i => i.id === p.id);
@@ -135,57 +117,60 @@ export default function App() {
   }
   function clearCart() { setCart([]); setAmountGiven(0); setEncaisseStep("saisie"); }
 
-  // ── Encaissement 2 étapes ────────────────────────────────────────────────────
   function goToConfirmation() { if (canEncaisser) setEncaisseStep("confirmation"); }
   function annulerConfirmation() { setEncaisseStep("saisie"); }
 
   async function confirmerRemise() {
     const tx = {
-      items:      cart.map(i => ({ id:i.id, name:i.name, emoji:i.emoji, price:i.price, qty:i.qty })),
-      total:      cartTotal,
-      given:      amountGiven,
-      change:     change,
+      items:  cart.map(i => ({ id:i.id, name:i.name, emoji:i.emoji, price:i.price, qty:i.qty })),
+      total:  cartTotal,
+      given:  amountGiven,
+      change: change,
     };
     const { error } = await supabase.from("transactions").insert([tx]);
     if (error) { alert("Erreur lors de l'enregistrement. Réessaie."); return; }
     clearCart();
   }
 
-  // ── CRUD produits ────────────────────────────────────────────────────────────
+  // ── CRUD avec refresh immédiat ────────────────────────────────────────────
   async function addProduct() {
     if (!newProduct.name || !newProduct.price) return;
     setSaving(true);
-    await supabase.from("products").insert([{ ...newProduct, price:parseFloat(newProduct.price) }]);
+    const { error } = await supabase.from("products").insert([{ ...newProduct, price:parseFloat(newProduct.price) }]);
+    if (error) { alert("Erreur : " + error.message); setSaving(false); return; }
     setNewProduct({ name:"", price:"", category:"Restauration", emoji:"🛒" });
     setShowAddForm(false);
     setSaving(false);
+    await loadProducts();
   }
 
   async function saveEdit() {
     if (!editingProduct.name || !editingProduct.price) return;
     setSaving(true);
-    await supabase.from("products").update({
+    const { error } = await supabase.from("products").update({
       name:     editingProduct.name,
       price:    parseFloat(editingProduct.price),
       category: editingProduct.category,
       emoji:    editingProduct.emoji,
     }).eq("id", editingProduct.id);
+    if (error) { alert("Erreur : " + error.message); setSaving(false); return; }
     setEditingProduct(null);
     setSaving(false);
+    await loadProducts();
   }
 
   async function deleteProduct(id) {
-    await supabase.from("products").delete().eq("id", id);
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) { alert("Erreur : " + error.message); return; }
     setCart(prev => prev.filter(i => i.id !== id));
     setDeleteConfirm(null);
+    await loadProducts();
   }
 
-  // ── Dérivés historique ───────────────────────────────────────────────────────
-  const today       = new Date().toDateString();
-  const txToday     = transactions.filter(t => new Date(t.created_at).toDateString() === today);
-  const totalJour   = txToday.reduce((s,t) => s + Number(t.total), 0);
+  const today     = new Date().toDateString();
+  const txToday   = transactions.filter(t => new Date(t.created_at).toDateString() === today);
+  const totalJour = txToday.reduce((s,t) => s + Number(t.total), 0);
 
-  // ─────────────────────────────────────────────────────────────────────────────
   if (loading) return (
     <div style={{ ...S.app, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16 }}>
       <Loader2 size={40} style={{ color:EVO_BLUE, animation:"spin 1s linear infinite" }} />
@@ -198,14 +183,12 @@ export default function App() {
     <div style={{ ...S.app, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16 }}>
       <WifiOff size={40} style={{ color:"#CC3333" }} />
       <p style={{ color:"#CC3333", fontSize:15, fontWeight:600 }}>Impossible de se connecter à Supabase.</p>
-      <p style={{ color:"#888", fontSize:13 }}>Vérifie tes variables d'environnement VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.</p>
+      <p style={{ color:"#888", fontSize:13 }}>Vérifie tes variables VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.</p>
     </div>
   );
 
-  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div style={S.app}>
-      {/* HEADER */}
       <header style={S.header}>
         <div style={S.logo}>
           <span style={{ fontSize:28 }}>⚽</span>
@@ -233,8 +216,6 @@ export default function App() {
         {/* ═══════════════════════════════════════════════════════ CAISSE */}
         {tab === "caisse" && (
           <div style={S.caisseGrid}>
-
-            {/* Produits */}
             <div style={S.card}>
               <div style={S.cardHeader}>
                 <span style={S.cardTitle}>Articles</span>
@@ -247,8 +228,7 @@ export default function App() {
               </div>
               <div style={S.productGrid}>
                 {filtered.map(p => (
-                  <button
-                    key={p.id} style={S.productBtn} onClick={() => addToCart(p)}
+                  <button key={p.id} style={S.productBtn} onClick={() => addToCart(p)}
                     onMouseEnter={e => { e.currentTarget.style.borderColor=EVO_BLUE; e.currentTarget.style.background=EVO_BLUE_LIGHT; e.currentTarget.style.transform="translateY(-2px)"; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background="white"; e.currentTarget.style.transform="none"; }}
                   >
@@ -260,10 +240,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Panier + Encaissement */}
             <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-
-              {/* Ticket */}
               <div style={S.card}>
                 <div style={S.cardHeader}>
                   <span style={S.cardTitle}>Ticket en cours</span>
@@ -303,7 +280,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Encaissement */}
               <div style={S.card}>
                 {encaisseStep === "saisie" ? (
                   <>
@@ -344,17 +320,16 @@ export default function App() {
                           </span>
                         </div>
                       )}
-                      <button style={{ width:"100%", padding:"16px", background:canEncaisser?EVO_GOLD:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10, transition:"all 0.15s" }}
+                      <button style={{ width:"100%", padding:"16px", background:canEncaisser?EVO_GOLD:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}
                         onClick={goToConfirmation}
                         onMouseEnter={e => { if(canEncaisser) e.currentTarget.style.background="#e09800"; }}
-                        onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=EVO_GOLD; }}
+                        onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=canEncaisser?EVO_GOLD:"#C8D0E8"; }}
                       >
                         <ArrowRight size={20}/> Valider le calcul
                       </button>
                     </div>
                   </>
                 ) : (
-                  /* ── Étape 2 : confirmation ── */
                   <div>
                     <div style={{ background:EVO_BLUE, borderRadius:"14px 14px 0 0", padding:"18px 20px 14px" }}>
                       <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>Étape 2/2 — Remise de monnaie</div>
@@ -478,11 +453,12 @@ export default function App() {
                   {[
                     { label:"Emoji", key:"emoji", placeholder:"🛒", type:"text" },
                     { label:"Nom *", key:"name", placeholder:"Ex: Hot-dog", type:"text" },
-                    { label:"Prix (€) *", key:"price", placeholder:"0,00", type:"number" },
+                    { label:"Prix (€) *", key:"price", placeholder:"0.00", type:"number" },
                   ].map(f => (
                     <div key={f.key}>
                       <label style={{ fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6 }}>{f.label}</label>
-                      <input style={S.input} type={f.type} step={f.type==="number"?"0.10":undefined} value={newProduct[f.key]} placeholder={f.placeholder}
+                      <input style={S.input} type={f.type} step={f.type==="number"?"0.10":undefined}
+                        value={newProduct[f.key]} placeholder={f.placeholder}
                         onChange={e => setNewProduct(p => ({ ...p, [f.key]:e.target.value }))}/>
                     </div>
                   ))}
@@ -521,7 +497,7 @@ export default function App() {
                     <div style={{ display:"flex", gap:8, marginTop:10 }}>
                       <button style={{ display:"flex", alignItems:"center", gap:5, padding:"7px 14px", background:EVO_BLUE, color:"white", border:"none", borderRadius:7, fontSize:13, fontWeight:600, cursor:"pointer" }}
                         onClick={saveEdit} disabled={saving}>
-                        {saving ? <Loader2 size={13}/> : <Save size={13}/>} Enregistrer
+                        {saving ? <Loader2 size={13} style={{ animation:"spin 1s linear infinite" }}/> : <Save size={13}/>} Enregistrer
                       </button>
                       <button style={{ padding:"7px 12px", background:"white", border:"1.5px solid #D0D6E8", borderRadius:7, fontSize:13, cursor:"pointer", color:"#666" }}
                         onClick={() => setEditingProduct(null)}>
