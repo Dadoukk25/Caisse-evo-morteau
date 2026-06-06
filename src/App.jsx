@@ -191,7 +191,7 @@ export default function App() {
     <div style={S.app}>
       <header style={S.header}>
         <div style={S.logo}>
-          <span style={{ fontSize:28 }}>⚽</span>
+          <span style={{ fontSize:28 }}>🤸</span>
           <div>
             <span style={{ color:EVO_GOLD }}>ÉVOLUTION</span>
             <span style={{ color:"white", marginLeft:6 }}>DE MORTEAU</span>
