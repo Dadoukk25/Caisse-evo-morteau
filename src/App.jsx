@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import {
   ShoppingCart, Clock, Settings, Plus, Minus, Trash2,
   CheckCircle, Edit3, X, Save, ArrowRight, RotateCcw,
-  Loader2, WifiOff
+  Loader2, WifiOff, AlertTriangle
 } from "lucide-react";
 
 const EVO_BLUE      = "#003B8E";
@@ -52,6 +52,9 @@ const S = {
   input:      { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", boxSizing:"border-box", background:"white" },
   select:     { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", background:"white" },
   iconBtn: c  => ({ width:32, height:32, borderRadius:8, border:`1.5px solid ${c}20`, background:`${c}10`, color:c, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }),
+  // Modal overlay
+  overlay:    { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 },
+  modal:      { background:"white", borderRadius:16, padding:32, maxWidth:420, width:"90%", textAlign:"center", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
 };
 
 export default function App() {
@@ -72,6 +75,10 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
   const [saving, setSaving]                 = useState(false);
 
+  // Historique : confirmation suppression
+  const [deleteTxConfirm, setDeleteTxConfirm]   = useState(null); // id transaction à supprimer
+  const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
+
   useEffect(() => {
     Promise.all([loadProducts(), loadTransactions()])
       .finally(() => setLoading(false));
@@ -80,9 +87,7 @@ export default function App() {
   useEffect(() => {
     const channel = supabase
       .channel("transactions-changes")
-      .on("postgres_changes", { event:"INSERT", schema:"public", table:"transactions" }, payload => {
-        setTransactions(prev => [payload.new, ...prev]);
-      })
+      .on("postgres_changes", { event:"*", schema:"public", table:"transactions" }, () => loadTransactions())
       .subscribe();
     return () => supabase.removeChannel(channel);
   }, []);
@@ -132,7 +137,23 @@ export default function App() {
     clearCart();
   }
 
-  // ── CRUD avec refresh immédiat ────────────────────────────────────────────
+  // ── Supprimer une transaction ─────────────────────────────────────────────
+  async function deleteTransaction(id) {
+    const { error } = await supabase.from("transactions").delete().eq("id", id);
+    if (error) { alert("Erreur : " + error.message); return; }
+    setDeleteTxConfirm(null);
+    await loadTransactions();
+  }
+
+  // ── Vider tout l'historique ───────────────────────────────────────────────
+  async function clearAllHistory() {
+    const { error } = await supabase.from("transactions").delete().neq("id", 0);
+    if (error) { alert("Erreur : " + error.message); return; }
+    setClearHistoryConfirm(false);
+    await loadTransactions();
+  }
+
+  // ── CRUD produits ─────────────────────────────────────────────────────────
   async function addProduct() {
     if (!newProduct.name || !newProduct.price) return;
     setSaving(true);
@@ -189,9 +210,54 @@ export default function App() {
 
   return (
     <div style={S.app}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+
+      {/* ── Modal suppression transaction ── */}
+      {deleteTxConfirm && (
+        <div style={S.overlay}>
+          <div style={S.modal}>
+            <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
+            <h3 style={{ margin:"0 0 8px", fontSize:18, color:"#1a1a2e" }}>Supprimer cette transaction ?</h3>
+            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible. La transaction sera définitivement supprimée.</p>
+            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }}
+                onClick={() => deleteTransaction(deleteTxConfirm)}>
+                Supprimer
+              </button>
+              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }}
+                onClick={() => setDeleteTxConfirm(null)}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal vider l'historique ── */}
+      {clearHistoryConfirm && (
+        <div style={S.overlay}>
+          <div style={S.modal}>
+            <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
+            <h3 style={{ margin:"0 0 8px", fontSize:18, color:"#1a1a2e" }}>Vider tout l'historique ?</h3>
+            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Toutes les transactions seront supprimées définitivement. Le CA sera remis à zéro.</p>
+            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }}
+                onClick={clearAllHistory}>
+                Tout supprimer
+              </button>
+              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }}
+                onClick={() => setClearHistoryConfirm(false)}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HEADER */}
       <header style={S.header}>
         <div style={S.logo}>
-          <span style={{ fontSize:28 }}>🤸</span>
+          <span style={{ fontSize:28 }}>⚽</span>
           <div>
             <span style={{ color:EVO_GOLD }}>ÉVOLUTION</span>
             <span style={{ color:"white", marginLeft:6 }}>DE MORTEAU</span>
@@ -381,12 +447,13 @@ export default function App() {
         {/* ═══════════════════════════════════════════════════ HISTORIQUE */}
         {tab === "historique" && (
           <div>
+            {/* Stats bar */}
             <div style={S.statsBar}>
               <div style={{ textAlign:"center" }}>
                 <div style={{ fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>CA du jour</div>
                 <div style={{ fontSize:32, fontWeight:800, color:EVO_GOLD }}>{formatPrice(totalJour)}</div>
               </div>
-              <div style={{ display:"flex", gap:32 }}>
+              <div style={{ display:"flex", gap:32, alignItems:"center" }}>
                 <div style={{ textAlign:"center" }}>
                   <div style={{ fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Transactions aujourd'hui</div>
                   <div style={{ fontSize:22, fontWeight:800, color:EVO_GOLD }}>{txToday.length}</div>
@@ -397,8 +464,18 @@ export default function App() {
                     {txToday.length > 0 ? formatPrice(totalJour/txToday.length) : "–"}
                   </div>
                 </div>
+                {/* Bouton vider historique */}
+                {transactions.length > 0 && (
+                  <button
+                    style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer" }}
+                    onClick={() => setClearHistoryConfirm(true)}
+                  >
+                    <Trash2 size={14}/> Vider l'historique
+                  </button>
+                )}
               </div>
             </div>
+
             {transactions.length === 0 ? (
               <div style={{ textAlign:"center", padding:"60px 20px", color:"#AAB" }}>
                 <Clock size={48} style={{ margin:"0 auto 16px", opacity:0.3, display:"block" }}/>
@@ -415,7 +492,17 @@ export default function App() {
                         #{transactions.length - i}
                       </span>
                     </div>
-                    <span style={{ fontSize:18, fontWeight:800, color:EVO_BLUE_DARK }}>{formatPrice(tx.total)}</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                      <span style={{ fontSize:18, fontWeight:800, color:EVO_BLUE_DARK }}>{formatPrice(tx.total)}</span>
+                      {/* Bouton supprimer transaction */}
+                      <button
+                        style={{ ...S.iconBtn("#CC3333"), border:"none" }}
+                        onClick={() => setDeleteTxConfirm(tx.id)}
+                        title="Supprimer cette transaction"
+                      >
+                        <Trash2 size={14}/>
+                      </button>
+                    </div>
                   </div>
                   <div style={{ fontSize:13, color:"#555", borderTop:"1px solid #F0F2F8", paddingTop:10, display:"flex", flexWrap:"wrap", gap:"4px 12px" }}>
                     {(tx.items||[]).map((item,j) => (
@@ -527,7 +614,6 @@ export default function App() {
                 )
               ))}
             </div>
-            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
           </div>
         )}
       </main>
