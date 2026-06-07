@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import {
   ShoppingCart, Clock, Settings, Plus, Minus, Trash2,
   CheckCircle, Edit3, X, Save, ArrowRight, RotateCcw,
-  Loader2, WifiOff, AlertTriangle
+  Loader2, WifiOff, AlertTriangle, Tag
 } from "lucide-react";
 
 const EVO_BLUE      = "#003B8E";
@@ -13,15 +13,9 @@ const EVO_GOLD      = "#F5A623";
 
 const QUICK_AMOUNTS = [0.10, 0.20, 0.50, 1, 2, 5, 10, 20, 50];
 
-function formatPrice(p) {
-  return Number(p).toFixed(2).replace(".", ",") + " €";
-}
-function formatTime(dateStr) {
-  return new Date(dateStr).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-}
-function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
+function formatPrice(p) { return Number(p).toFixed(2).replace(".", ",") + " €"; }
+function formatTime(d)  { return new Date(d).toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }); }
+function formatDate(d)  { return new Date(d).toLocaleDateString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric" }); }
 
 const S = {
   app:        { minHeight:"100vh", background:"#F4F6FB", fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#1a1a2e" },
@@ -52,7 +46,6 @@ const S = {
   input:      { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", boxSizing:"border-box", background:"white" },
   select:     { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", background:"white" },
   iconBtn: c  => ({ width:32, height:32, borderRadius:8, border:`1.5px solid ${c}20`, background:`${c}10`, color:c, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }),
-  // Modal overlay
   overlay:    { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 },
   modal:      { background:"white", borderRadius:16, padding:32, maxWidth:420, width:"90%", textAlign:"center", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
 };
@@ -60,6 +53,7 @@ const S = {
 export default function App() {
   const [tab, setTab]                   = useState("caisse");
   const [products, setProducts]         = useState([]);
+  const [categories, setCategories]     = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading]           = useState(true);
   const [dbError, setDbError]           = useState(false);
@@ -70,17 +64,21 @@ export default function App() {
   const [encaisseStep, setEncaisseStep] = useState("saisie");
 
   const [editingProduct, setEditingProduct] = useState(null);
-  const [newProduct, setNewProduct]         = useState({ name:"", price:"", category:"Restauration", emoji:"🛒" });
+  const [newProduct, setNewProduct]         = useState({ name:"", price:"", category:"", emoji:"🛒" });
   const [showAddForm, setShowAddForm]       = useState(false);
   const [deleteConfirm, setDeleteConfirm]   = useState(null);
   const [saving, setSaving]                 = useState(false);
 
-  // Historique : confirmation suppression
-  const [deleteTxConfirm, setDeleteTxConfirm]   = useState(null); // id transaction à supprimer
+  const [deleteTxConfirm, setDeleteTxConfirm]         = useState(null);
   const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
 
+  // Catégories
+  const [newCatName, setNewCatName]         = useState("");
+  const [deleteCatConfirm, setDeleteCatConfirm] = useState(null);
+  const [savingCat, setSavingCat]           = useState(false);
+
   useEffect(() => {
-    Promise.all([loadProducts(), loadTransactions()])
+    Promise.all([loadProducts(), loadTransactions(), loadCategories()])
       .finally(() => setLoading(false));
   }, []);
 
@@ -104,40 +102,46 @@ export default function App() {
     setTransactions(data);
   }
 
-  const categories   = ["Tous", ...Array.from(new Set(products.map(p => p.category)))];
+  async function loadCategories() {
+    const { data, error } = await supabase.from("categories").select("*").order("name");
+    if (error) { setDbError(true); return; }
+    setCategories(data);
+  }
+
+  const catNames     = categories.map(c => c.name);
+  const catTabs      = ["Tous", ...catNames];
   const filtered     = selectedCat === "Tous" ? products : products.filter(p => p.category === selectedCat);
   const cartTotal    = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const change       = amountGiven - cartTotal;
   const canEncaisser = cart.length > 0 && amountGiven >= cartTotal;
 
+  // Initialise la catégorie par défaut du nouveau produit quand les catégories chargent
+  useEffect(() => {
+    if (catNames.length > 0 && !newProduct.category) {
+      setNewProduct(p => ({ ...p, category: catNames[0] }));
+    }
+  }, [categories]);
+
   function addToCart(p) {
     setCart(prev => {
       const ex = prev.find(i => i.id === p.id);
-      return ex ? prev.map(i => i.id === p.id ? { ...i, qty:i.qty+1 } : i)
-                : [...prev, { ...p, qty:1 }];
+      return ex ? prev.map(i => i.id === p.id ? { ...i, qty:i.qty+1 } : i) : [...prev, { ...p, qty:1 }];
     });
   }
   function updateQty(id, delta) {
     setCart(prev => prev.map(i => i.id===id ? {...i,qty:i.qty+delta} : i).filter(i=>i.qty>0));
   }
   function clearCart() { setCart([]); setAmountGiven(0); setEncaisseStep("saisie"); }
-
   function goToConfirmation() { if (canEncaisser) setEncaisseStep("confirmation"); }
   function annulerConfirmation() { setEncaisseStep("saisie"); }
 
   async function confirmerRemise() {
-    const tx = {
-      items:  cart.map(i => ({ id:i.id, name:i.name, emoji:i.emoji, price:i.price, qty:i.qty })),
-      total:  cartTotal,
-      given:  amountGiven,
-      change: change,
-    };
+    const tx = { items: cart.map(i => ({ id:i.id, name:i.name, emoji:i.emoji, price:i.price, qty:i.qty })), total:cartTotal, given:amountGiven, change };
     const { error } = await supabase.from("transactions").insert([tx]);
-    if (error) { alert("Erreur lors de l'enregistrement. Réessaie."); return; }
+    if (error) { alert("Erreur lors de l'enregistrement."); return; }
     clearCart();
   }
 
-  // ── Supprimer une transaction ─────────────────────────────────────────────
   async function deleteTransaction(id) {
     const { error } = await supabase.from("transactions").delete().eq("id", id);
     if (error) { alert("Erreur : " + error.message); return; }
@@ -145,7 +149,6 @@ export default function App() {
     await loadTransactions();
   }
 
-  // ── Vider tout l'historique ───────────────────────────────────────────────
   async function clearAllHistory() {
     const { error } = await supabase.from("transactions").delete().neq("id", 0);
     if (error) { alert("Erreur : " + error.message); return; }
@@ -153,13 +156,12 @@ export default function App() {
     await loadTransactions();
   }
 
-  // ── CRUD produits ─────────────────────────────────────────────────────────
   async function addProduct() {
-    if (!newProduct.name || !newProduct.price) return;
+    if (!newProduct.name || !newProduct.price || !newProduct.category) return;
     setSaving(true);
     const { error } = await supabase.from("products").insert([{ ...newProduct, price:parseFloat(newProduct.price) }]);
     if (error) { alert("Erreur : " + error.message); setSaving(false); return; }
-    setNewProduct({ name:"", price:"", category:"Restauration", emoji:"🛒" });
+    setNewProduct({ name:"", price:"", category:catNames[0]||"", emoji:"🛒" });
     setShowAddForm(false);
     setSaving(false);
     await loadProducts();
@@ -169,10 +171,8 @@ export default function App() {
     if (!editingProduct.name || !editingProduct.price) return;
     setSaving(true);
     const { error } = await supabase.from("products").update({
-      name:     editingProduct.name,
-      price:    parseFloat(editingProduct.price),
-      category: editingProduct.category,
-      emoji:    editingProduct.emoji,
+      name: editingProduct.name, price: parseFloat(editingProduct.price),
+      category: editingProduct.category, emoji: editingProduct.emoji,
     }).eq("id", editingProduct.id);
     if (error) { alert("Erreur : " + error.message); setSaving(false); return; }
     setEditingProduct(null);
@@ -186,6 +186,32 @@ export default function App() {
     setCart(prev => prev.filter(i => i.id !== id));
     setDeleteConfirm(null);
     await loadProducts();
+  }
+
+  // ── CRUD catégories ───────────────────────────────────────────────────────
+  async function addCategory() {
+    const name = newCatName.trim();
+    if (!name) return;
+    setSavingCat(true);
+    const { error } = await supabase.from("categories").insert([{ name }]);
+    if (error) { alert("Erreur : " + error.message); setSavingCat(false); return; }
+    setNewCatName("");
+    setSavingCat(false);
+    await loadCategories();
+  }
+
+  async function deleteCategory(id, name) {
+    // Vérifie si des produits utilisent cette catégorie
+    const linked = products.filter(p => p.category === name);
+    if (linked.length > 0) {
+      alert(`Impossible de supprimer "${name}" : ${linked.length} article(s) l'utilisent encore.`);
+      setDeleteCatConfirm(null);
+      return;
+    }
+    const { error } = await supabase.from("categories").delete().eq("id", id);
+    if (error) { alert("Erreur : " + error.message); return; }
+    setDeleteCatConfirm(null);
+    await loadCategories();
   }
 
   const today     = new Date().toDateString();
@@ -212,43 +238,46 @@ export default function App() {
     <div style={S.app}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
-      {/* ── Modal suppression transaction ── */}
+      {/* Modal suppression transaction */}
       {deleteTxConfirm && (
         <div style={S.overlay}>
           <div style={S.modal}>
             <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
-            <h3 style={{ margin:"0 0 8px", fontSize:18, color:"#1a1a2e" }}>Supprimer cette transaction ?</h3>
-            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible. La transaction sera définitivement supprimée.</p>
+            <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Supprimer cette transaction ?</h3>
+            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible.</p>
             <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
-              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }}
-                onClick={() => deleteTransaction(deleteTxConfirm)}>
-                Supprimer
-              </button>
-              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }}
-                onClick={() => setDeleteTxConfirm(null)}>
-                Annuler
-              </button>
+              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={() => deleteTransaction(deleteTxConfirm)}>Supprimer</button>
+              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setDeleteTxConfirm(null)}>Annuler</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Modal vider l'historique ── */}
+      {/* Modal vider historique */}
       {clearHistoryConfirm && (
         <div style={S.overlay}>
           <div style={S.modal}>
             <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
-            <h3 style={{ margin:"0 0 8px", fontSize:18, color:"#1a1a2e" }}>Vider tout l'historique ?</h3>
-            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Toutes les transactions seront supprimées définitivement. Le CA sera remis à zéro.</p>
+            <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Vider tout l'historique ?</h3>
+            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Toutes les transactions seront supprimées définitivement.</p>
             <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
-              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }}
-                onClick={clearAllHistory}>
-                Tout supprimer
-              </button>
-              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }}
-                onClick={() => setClearHistoryConfirm(false)}>
-                Annuler
-              </button>
+              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={clearAllHistory}>Tout supprimer</button>
+              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setClearHistoryConfirm(false)}>Annuler</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal suppression catégorie */}
+      {deleteCatConfirm && (
+        <div style={S.overlay}>
+          <div style={S.modal}>
+            <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
+            <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Supprimer la catégorie "{deleteCatConfirm.name}" ?</h3>
+            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible.</p>
+            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={() => deleteCategory(deleteCatConfirm.id, deleteCatConfirm.name)}>Supprimer</button>
+              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setDeleteCatConfirm(null)}>Annuler</button>
             </div>
           </div>
         </div>
@@ -257,7 +286,7 @@ export default function App() {
       {/* HEADER */}
       <header style={S.header}>
         <div style={S.logo}>
-          <span style={{ fontSize:28 }}>⚽</span>
+          <span style={{ fontSize:28 }}>🏆</span>
           <div>
             <span style={{ color:EVO_GOLD }}>ÉVOLUTION</span>
             <span style={{ color:"white", marginLeft:6 }}>DE MORTEAU</span>
@@ -288,7 +317,7 @@ export default function App() {
                 <span style={{ fontSize:13, color:"#888" }}>{filtered.length} articles</span>
               </div>
               <div style={S.catTabs}>
-                {categories.map(c => (
+                {catTabs.map(c => (
                   <button key={c} style={S.catTab(selectedCat===c)} onClick={() => setSelectedCat(c)}>{c}</button>
                 ))}
               </div>
@@ -331,9 +360,7 @@ export default function App() {
                         <span style={{ fontSize:15, fontWeight:700, minWidth:20, textAlign:"center" }}>{item.qty}</span>
                         <button style={S.qtyBtn} onClick={() => updateQty(item.id,1)}><Plus size={12}/></button>
                         <span style={{ fontSize:14, fontWeight:600, color:EVO_BLUE, minWidth:60, textAlign:"right" }}>{formatPrice(item.price*item.qty)}</span>
-                        <button style={{ ...S.iconBtn("#CC3333"), border:"none" }} onClick={() => setCart(prev=>prev.filter(i=>i.id!==item.id))}>
-                          <X size={13}/>
-                        </button>
+                        <button style={{ ...S.iconBtn("#CC3333"), border:"none" }} onClick={() => setCart(prev=>prev.filter(i=>i.id!==item.id))}><X size={13}/></button>
                       </div>
                     ))}
                   </div>
@@ -371,19 +398,12 @@ export default function App() {
                           <span style={{ fontSize:13, color:"#666" }}>Reçu</span>
                           <span style={{ fontSize:20, fontWeight:800, color:"#333" }}>{formatPrice(amountGiven)}</span>
                         </div>
-                        <button style={{ border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600" }}
-                          onClick={() => setAmountGiven(0)}>
-                          ✕ Effacer
-                        </button>
+                        <button style={{ border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600" }} onClick={() => setAmountGiven(0)}>✕ Effacer</button>
                       </div>
                       {amountGiven > 0 && (
                         <div style={S.changeDisplay(change>=0)}>
-                          <span style={{ fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828" }}>
-                            {change>=0 ? "Monnaie à rendre" : "⚠️ Manque"}
-                          </span>
-                          <span style={{ fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828" }}>
-                            {formatPrice(Math.abs(change))}
-                          </span>
+                          <span style={{ fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828" }}>{change>=0 ? "Monnaie à rendre" : "⚠️ Manque"}</span>
+                          <span style={{ fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828" }}>{formatPrice(Math.abs(change))}</span>
                         </div>
                       )}
                       <button style={{ width:"100%", padding:"16px", background:canEncaisser?EVO_GOLD:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}
@@ -403,17 +423,11 @@ export default function App() {
                     </div>
                     <div style={{ padding:"32px 20px 24px", textAlign:"center", background:change===0?"#F0FBF4":"#F0F8FF", borderBottom:"1px solid #E8EAF0" }}>
                       {change === 0 ? (
-                        <>
-                          <div style={{ fontSize:48, marginBottom:8 }}>✅</div>
-                          <div style={{ fontSize:16, color:"#2E7D32", fontWeight:600, marginBottom:4 }}>Compte exact</div>
-                          <div style={{ fontSize:13, color:"#888" }}>Aucune monnaie à rendre</div>
-                        </>
+                        <><div style={{ fontSize:48, marginBottom:8 }}>✅</div><div style={{ fontSize:16, color:"#2E7D32", fontWeight:600, marginBottom:4 }}>Compte exact</div><div style={{ fontSize:13, color:"#888" }}>Aucune monnaie à rendre</div></>
                       ) : (
-                        <>
-                          <div style={{ fontSize:13, color:"#555", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:12 }}>Monnaie à rendre</div>
-                          <div style={{ fontSize:72, fontWeight:900, color:EVO_BLUE_DARK, lineHeight:1, letterSpacing:"-2px", marginBottom:6 }}>{formatPrice(change)}</div>
-                          <div style={{ fontSize:14, color:"#888" }}>{formatPrice(amountGiven)} − {formatPrice(cartTotal)} = <strong style={{ color:EVO_BLUE }}>{formatPrice(change)}</strong></div>
-                        </>
+                        <><div style={{ fontSize:13, color:"#555", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:12 }}>Monnaie à rendre</div>
+                        <div style={{ fontSize:72, fontWeight:900, color:EVO_BLUE_DARK, lineHeight:1, letterSpacing:"-2px", marginBottom:6 }}>{formatPrice(change)}</div>
+                        <div style={{ fontSize:14, color:"#888" }}>{formatPrice(amountGiven)} − {formatPrice(cartTotal)} = <strong style={{ color:EVO_BLUE }}>{formatPrice(change)}</strong></div></>
                       )}
                     </div>
                     <div style={{ padding:"12px 20px", borderBottom:"1px solid #F0F2F8", maxHeight:130, overflowY:"auto" }}>
@@ -432,8 +446,7 @@ export default function App() {
                       >
                         <CheckCircle size={22}/> Monnaie remise — Terminer
                       </button>
-                      <button style={{ width:"100%", padding:"11px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:10, fontSize:14, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}
-                        onClick={annulerConfirmation}>
+                      <button style={{ width:"100%", padding:"11px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:10, fontSize:14, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }} onClick={annulerConfirmation}>
                         <RotateCcw size={14}/> Corriger le montant reçu
                       </button>
                     </div>
@@ -447,7 +460,6 @@ export default function App() {
         {/* ═══════════════════════════════════════════════════ HISTORIQUE */}
         {tab === "historique" && (
           <div>
-            {/* Stats bar */}
             <div style={S.statsBar}>
               <div style={{ textAlign:"center" }}>
                 <div style={{ fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>CA du jour</div>
@@ -460,22 +472,16 @@ export default function App() {
                 </div>
                 <div style={{ textAlign:"center" }}>
                   <div style={{ fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Panier moyen</div>
-                  <div style={{ fontSize:22, fontWeight:800, color:EVO_GOLD }}>
-                    {txToday.length > 0 ? formatPrice(totalJour/txToday.length) : "–"}
-                  </div>
+                  <div style={{ fontSize:22, fontWeight:800, color:EVO_GOLD }}>{txToday.length > 0 ? formatPrice(totalJour/txToday.length) : "–"}</div>
                 </div>
-                {/* Bouton vider historique */}
                 {transactions.length > 0 && (
-                  <button
-                    style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer" }}
-                    onClick={() => setClearHistoryConfirm(true)}
-                  >
+                  <button style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer" }}
+                    onClick={() => setClearHistoryConfirm(true)}>
                     <Trash2 size={14}/> Vider l'historique
                   </button>
                 )}
               </div>
             </div>
-
             {transactions.length === 0 ? (
               <div style={{ textAlign:"center", padding:"60px 20px", color:"#AAB" }}>
                 <Clock size={48} style={{ margin:"0 auto 16px", opacity:0.3, display:"block" }}/>
@@ -486,28 +492,16 @@ export default function App() {
                 <div key={tx.id} style={S.txCard}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
                     <div style={{ fontSize:13, color:"#888", display:"flex", alignItems:"center", gap:5 }}>
-                      <Clock size={14}/>
-                      {formatDate(tx.created_at)} {formatTime(tx.created_at)}
-                      <span style={{ marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666" }}>
-                        #{transactions.length - i}
-                      </span>
+                      <Clock size={14}/> {formatDate(tx.created_at)} {formatTime(tx.created_at)}
+                      <span style={{ marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666" }}>#{transactions.length - i}</span>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:12 }}>
                       <span style={{ fontSize:18, fontWeight:800, color:EVO_BLUE_DARK }}>{formatPrice(tx.total)}</span>
-                      {/* Bouton supprimer transaction */}
-                      <button
-                        style={{ ...S.iconBtn("#CC3333"), border:"none" }}
-                        onClick={() => setDeleteTxConfirm(tx.id)}
-                        title="Supprimer cette transaction"
-                      >
-                        <Trash2 size={14}/>
-                      </button>
+                      <button style={{ ...S.iconBtn("#CC3333"), border:"none" }} onClick={() => setDeleteTxConfirm(tx.id)} title="Supprimer"><Trash2 size={14}/></button>
                     </div>
                   </div>
                   <div style={{ fontSize:13, color:"#555", borderTop:"1px solid #F0F2F8", paddingTop:10, display:"flex", flexWrap:"wrap", gap:"4px 12px" }}>
-                    {(tx.items||[]).map((item,j) => (
-                      <span key={j}>{item.emoji} {item.name} ×{item.qty}</span>
-                    ))}
+                    {(tx.items||[]).map((item,j) => <span key={j}>{item.emoji} {item.name} ×{item.qty}</span>)}
                   </div>
                   <div style={{ marginTop:10, display:"flex", gap:16, fontSize:12, color:"#888" }}>
                     <span>Reçu : <strong style={{ color:"#333" }}>{formatPrice(tx.given)}</strong></span>
@@ -522,10 +516,62 @@ export default function App() {
         {/* ══════════════════════════════════════════════════ PARAMÈTRES */}
         {tab === "parametres" && (
           <div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+
+            {/* ── Section catégories ── */}
+            <div style={{ marginBottom:28 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                <div>
+                  <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:EVO_BLUE_DARK }}>Catégories</h2>
+                  <p style={{ margin:"4px 0 0", color:"#888", fontSize:14 }}>{categories.length} catégorie(s)</p>
+                </div>
+              </div>
+              <div style={S.card}>
+                {/* Ligne d'ajout */}
+                <div style={{ padding:"14px 20px", borderBottom:"1px solid #F0F2F8", display:"flex", gap:10, alignItems:"center" }}>
+                  <Tag size={18} style={{ color:EVO_BLUE, flexShrink:0 }} />
+                  <input
+                    style={{ ...S.input, margin:0 }}
+                    placeholder="Nouvelle catégorie (ex: Apéro, Dessert…)"
+                    value={newCatName}
+                    onChange={e => setNewCatName(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addCategory()}
+                  />
+                  <button style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:EVO_BLUE, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}
+                    onClick={addCategory} disabled={savingCat}>
+                    {savingCat ? <Loader2 size={13} style={{ animation:"spin 1s linear infinite" }}/> : <Plus size={13}/>} Ajouter
+                  </button>
+                </div>
+                {/* Liste des catégories */}
+                {categories.length === 0 ? (
+                  <div style={{ padding:"20px", textAlign:"center", color:"#AAB", fontSize:14 }}>Aucune catégorie</div>
+                ) : (
+                  categories.map(cat => (
+                    <div key={cat.id} style={{ ...S.settingsRow, background: deleteCatConfirm?.id===cat.id ? "#FFF8F8" : "transparent" }}>
+                      <Tag size={16} style={{ color:EVO_BLUE, flexShrink:0 }} />
+                      <span style={{ flex:1, fontWeight:600, fontSize:14 }}>{cat.name}</span>
+                      <span style={{ fontSize:12, color:"#AAB" }}>
+                        {products.filter(p => p.category === cat.name).length} article(s)
+                      </span>
+                      {deleteCatConfirm?.id === cat.id ? (
+                        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                          <span style={{ fontSize:12, color:"#CC3333", fontWeight:600 }}>Supprimer ?</span>
+                          <button style={{ ...S.iconBtn("#CC3333"), border:"none", background:"#CC3333", color:"white" }} onClick={() => setDeleteCatConfirm(cat)}><CheckCircle size={14}/></button>
+                          <button style={{ ...S.iconBtn("#666"), border:"none" }} onClick={() => setDeleteCatConfirm(null)}><X size={14}/></button>
+                        </div>
+                      ) : (
+                        <button style={S.iconBtn("#CC3333")} onClick={() => setDeleteCatConfirm(cat)}><Trash2 size={14}/></button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* ── Section articles ── */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
               <div>
-                <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:EVO_BLUE_DARK }}>Gestion des articles</h2>
-                <p style={{ margin:"4px 0 0", color:"#888", fontSize:14 }}>{products.length} articles configurés</p>
+                <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:EVO_BLUE_DARK }}>Articles</h2>
+                <p style={{ margin:"4px 0 0", color:"#888", fontSize:14 }}>{products.length} article(s) configuré(s)</p>
               </div>
               <button style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 18px", background:EVO_BLUE, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:600, cursor:"pointer" }}
                 onClick={() => { setShowAddForm(!showAddForm); setEditingProduct(null); }}>
@@ -552,7 +598,7 @@ export default function App() {
                   <div>
                     <label style={{ fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6 }}>Catégorie</label>
                     <select style={S.select} value={newProduct.category} onChange={e => setNewProduct(p => ({ ...p, category:e.target.value }))}>
-                      {["Restauration","Billetterie","Boutique"].map(c => <option key={c}>{c}</option>)}
+                      {catNames.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
                 </div>
@@ -561,10 +607,7 @@ export default function App() {
                     onClick={addProduct} disabled={saving}>
                     {saving ? <Loader2 size={14} style={{ animation:"spin 1s linear infinite" }}/> : <Save size={14}/>} Enregistrer
                   </button>
-                  <button style={{ padding:"10px 16px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }}
-                    onClick={() => setShowAddForm(false)}>
-                    Annuler
-                  </button>
+                  <button style={{ padding:"10px 16px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setShowAddForm(false)}>Annuler</button>
                 </div>
               </div>
             )}
@@ -578,7 +621,7 @@ export default function App() {
                       <input style={S.input} value={editingProduct.name} onChange={e => setEditingProduct(p => ({ ...p, name:e.target.value }))}/>
                       <input style={S.input} type="number" step="0.10" value={editingProduct.price} onChange={e => setEditingProduct(p => ({ ...p, price:e.target.value }))}/>
                       <select style={S.select} value={editingProduct.category} onChange={e => setEditingProduct(p => ({ ...p, category:e.target.value }))}>
-                        {["Restauration","Billetterie","Boutique"].map(c => <option key={c}>{c}</option>)}
+                        {catNames.map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
                     <div style={{ display:"flex", gap:8, marginTop:10 }}>
@@ -586,10 +629,7 @@ export default function App() {
                         onClick={saveEdit} disabled={saving}>
                         {saving ? <Loader2 size={13} style={{ animation:"spin 1s linear infinite" }}/> : <Save size={13}/>} Enregistrer
                       </button>
-                      <button style={{ padding:"7px 12px", background:"white", border:"1.5px solid #D0D6E8", borderRadius:7, fontSize:13, cursor:"pointer", color:"#666" }}
-                        onClick={() => setEditingProduct(null)}>
-                        Annuler
-                      </button>
+                      <button style={{ padding:"7px 12px", background:"white", border:"1.5px solid #D0D6E8", borderRadius:7, fontSize:13, cursor:"pointer", color:"#666" }} onClick={() => setEditingProduct(null)}>Annuler</button>
                     </div>
                   </div>
                 ) : (
