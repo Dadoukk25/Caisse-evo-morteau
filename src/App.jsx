@@ -141,8 +141,9 @@ export default function App() {
   async function confirmerRemise() {
     const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change };
     const { error } = await supabase.from("transactions").insert([tx]);
-    if (error) { alert("Erreur lors de l'enregistrement."); return; }
+    if (error) { alert("Erreur lors de l'enregistrement : " + error.message); return; }
     clearCart();
+    await loadTransactions();
   }
   async function deleteTransaction(id) {
     const { error } = await supabase.from("transactions").delete().eq("id", id);
