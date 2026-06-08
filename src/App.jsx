@@ -1,54 +1,42 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
 import {
   ShoppingCart, Clock, Settings, Plus, Minus, Trash2,
   CheckCircle, Edit3, X, Save, ArrowRight, RotateCcw,
-  Loader2, WifiOff, AlertTriangle, Tag
+  Loader2, WifiOff, AlertTriangle, Tag, Palette, RotateCcw as Reset
 } from "lucide-react";
 
-const EVO_BLUE      = "#003B8E";
-const EVO_BLUE_DARK = "#002870";
-const EVO_BLUE_LIGHT= "#E8F0FB";
-const EVO_GOLD      = "#F5A623";
+const DEFAULTS = {
+  primary:    "#003B8E",
+  accent:     "#F5A623",
+  background: "#F4F6FB",
+};
+
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `${r},${g},${b}`;
+}
+function lighten(hex, pct=0.9) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  const mix = v => Math.round(v + (255-v)*pct);
+  return `#${mix(r).toString(16).padStart(2,'0')}${mix(g).toString(16).padStart(2,'0')}${mix(b).toString(16).padStart(2,'0')}`;
+}
+function darken(hex, pct=0.15) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  const mix = v => Math.round(v*(1-pct));
+  return `#${mix(r).toString(16).padStart(2,'0')}${mix(g).toString(16).padStart(2,'0')}${mix(b).toString(16).padStart(2,'0')}`;
+}
 
 const QUICK_AMOUNTS = [0.10, 0.20, 0.50, 1, 2, 5, 10, 20, 50];
-
 function formatPrice(p) { return Number(p).toFixed(2).replace(".", ",") + " €"; }
 function formatTime(d)  { return new Date(d).toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }); }
 function formatDate(d)  { return new Date(d).toLocaleDateString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric" }); }
-
-const S = {
-  app:        { minHeight:"100vh", background:"#F4F6FB", fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#1a1a2e" },
-  header:     { background:EVO_BLUE, padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between", height:60, boxShadow:"0 2px 12px rgba(0,59,142,0.3)" },
-  logo:       { display:"flex", alignItems:"center", gap:12, color:"white", fontWeight:700, fontSize:18 },
-  nav:        { display:"flex", gap:4 },
-  navBtn: a => ({ display:"flex", alignItems:"center", gap:8, padding:"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontSize:14, fontWeight:a?600:400, background:a?"rgba(255,255,255,0.15)":"transparent", color:a?"white":"rgba(255,255,255,0.7)", transition:"all 0.15s" }),
-  content:    { padding:"24px", maxWidth:1400, margin:"0 auto" },
-  caisseGrid: { display:"grid", gridTemplateColumns:"1fr 400px", gap:20, alignItems:"start" },
-  card:       { background:"white", borderRadius:16, border:"1px solid #E8EAF0", overflow:"hidden" },
-  cardHeader: { padding:"16px 20px", borderBottom:"1px solid #F0F2F8", display:"flex", alignItems:"center", justifyContent:"space-between" },
-  cardTitle:  { fontWeight:700, fontSize:15, color:EVO_BLUE_DARK },
-  catTabs:    { display:"flex", gap:8, padding:"12px 20px", borderBottom:"1px solid #F0F2F8", flexWrap:"wrap" },
-  catTab: a => ({ padding:"6px 16px", borderRadius:20, border:`1.5px solid ${a?EVO_BLUE:"#E0E4F0"}`, background:a?EVO_BLUE:"white", color:a?"white":"#555", fontSize:13, fontWeight:a?600:400, cursor:"pointer" }),
-  productGrid:{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))", gap:12, padding:20 },
-  productBtn: { background:"white", border:"1.5px solid #E8EAF0", borderRadius:14, padding:"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:8, transition:"all 0.12s" },
-  cartItems:  { padding:"12px 16px", maxHeight:260, overflowY:"auto" },
-  cartItem:   { display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:"1px solid #F4F6FB" },
-  qtyBtn:     { width:28, height:28, borderRadius:8, border:`1.5px solid ${EVO_BLUE}`, background:"white", color:EVO_BLUE, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:14 },
-  totalSection:{ padding:"14px 16px", borderTop:"2px solid #F0F2F8", background:EVO_BLUE_LIGHT },
-  monnaieSection:{ padding:"14px 16px" },
-  quickAmountsGrid:{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 },
-  quickBtn:   { padding:"10px 6px", background:"white", border:`1.5px solid ${EVO_BLUE}`, borderRadius:10, color:EVO_BLUE, fontWeight:700, fontSize:13, cursor:"pointer", textAlign:"center", transition:"all 0.12s" },
-  changeDisplay: ok => ({ background:ok?"#EDFBF0":"#FFF0F0", border:`1.5px solid ${ok?"#5CB872":"#E55"}`, borderRadius:10, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }),
-  statsBar:   { background:EVO_BLUE, borderRadius:16, padding:"24px 28px", marginBottom:20, color:"white", display:"flex", alignItems:"center", justifyContent:"space-between" },
-  txCard:     { background:"white", borderRadius:14, border:"1px solid #E8EAF0", padding:"16px 20px", marginBottom:12 },
-  settingsRow:{ display:"flex", alignItems:"center", padding:"14px 20px", borderBottom:"1px solid #F0F2F8", gap:12 },
-  input:      { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", boxSizing:"border-box", background:"white" },
-  select:     { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", background:"white" },
-  iconBtn: c  => ({ width:32, height:32, borderRadius:8, border:`1.5px solid ${c}20`, background:`${c}10`, color:c, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }),
-  overlay:    { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 },
-  modal:      { background:"white", borderRadius:16, padding:32, maxWidth:420, width:"90%", textAlign:"center", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
-};
 
 export default function App() {
   const [tab, setTab]                   = useState("caisse");
@@ -72,13 +60,25 @@ export default function App() {
   const [deleteTxConfirm, setDeleteTxConfirm]         = useState(null);
   const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
 
-  // Catégories
-  const [newCatName, setNewCatName]         = useState("");
+  const [newCatName, setNewCatName]             = useState("");
   const [deleteCatConfirm, setDeleteCatConfirm] = useState(null);
-  const [savingCat, setSavingCat]           = useState(false);
+  const [savingCat, setSavingCat]               = useState(false);
+
+  // Couleurs
+  const [colors, setColors]       = useState({ primary: DEFAULTS.primary, accent: DEFAULTS.accent, background: DEFAULTS.background });
+  const [savingColors, setSavingColors] = useState(false);
+
+  // Dérivés couleurs
+  const C = {
+    primary:    colors.primary,
+    primaryDark: darken(colors.primary, 0.15),
+    primaryLight: lighten(colors.primary, 0.9),
+    accent:     colors.accent,
+    background: colors.background,
+  };
 
   useEffect(() => {
-    Promise.all([loadProducts(), loadTransactions(), loadCategories()])
+    Promise.all([loadProducts(), loadTransactions(), loadCategories(), loadColors()])
       .finally(() => setLoading(false));
   }, []);
 
@@ -95,17 +95,40 @@ export default function App() {
     if (error) { setDbError(true); return; }
     setProducts(data);
   }
-
   async function loadTransactions() {
     const { data, error } = await supabase.from("transactions").select("*").order("created_at", { ascending:false }).limit(200);
     if (error) { setDbError(true); return; }
     setTransactions(data);
   }
-
   async function loadCategories() {
     const { data, error } = await supabase.from("categories").select("*").order("name");
     if (error) { setDbError(true); return; }
     setCategories(data);
+  }
+  async function loadColors() {
+    const { data, error } = await supabase.from("settings").select("*");
+    if (error || !data) return;
+    const map = {};
+    data.forEach(row => { map[row.key] = row.value; });
+    setColors({
+      primary:    map["color_primary"]    || DEFAULTS.primary,
+      accent:     map["color_accent"]     || DEFAULTS.accent,
+      background: map["color_background"] || DEFAULTS.background,
+    });
+  }
+
+  async function saveColors() {
+    setSavingColors(true);
+    await Promise.all([
+      supabase.from("settings").upsert({ key:"color_primary",    value:colors.primary    }, { onConflict:"key" }),
+      supabase.from("settings").upsert({ key:"color_accent",     value:colors.accent     }, { onConflict:"key" }),
+      supabase.from("settings").upsert({ key:"color_background", value:colors.background }, { onConflict:"key" }),
+    ]);
+    setSavingColors(false);
+  }
+
+  function resetColors() {
+    setColors({ primary: DEFAULTS.primary, accent: DEFAULTS.accent, background: DEFAULTS.background });
   }
 
   const catNames     = categories.map(c => c.name);
@@ -115,7 +138,6 @@ export default function App() {
   const change       = amountGiven - cartTotal;
   const canEncaisser = cart.length > 0 && amountGiven >= cartTotal;
 
-  // Initialise la catégorie par défaut du nouveau produit quand les catégories chargent
   useEffect(() => {
     if (catNames.length > 0 && !newProduct.category) {
       setNewProduct(p => ({ ...p, category: catNames[0] }));
@@ -141,21 +163,18 @@ export default function App() {
     if (error) { alert("Erreur lors de l'enregistrement."); return; }
     clearCart();
   }
-
   async function deleteTransaction(id) {
     const { error } = await supabase.from("transactions").delete().eq("id", id);
     if (error) { alert("Erreur : " + error.message); return; }
     setDeleteTxConfirm(null);
     await loadTransactions();
   }
-
   async function clearAllHistory() {
     const { error } = await supabase.from("transactions").delete().neq("id", 0);
     if (error) { alert("Erreur : " + error.message); return; }
     setClearHistoryConfirm(false);
     await loadTransactions();
   }
-
   async function addProduct() {
     if (!newProduct.name || !newProduct.price || !newProduct.category) return;
     setSaving(true);
@@ -166,7 +185,6 @@ export default function App() {
     setSaving(false);
     await loadProducts();
   }
-
   async function saveEdit() {
     if (!editingProduct.name || !editingProduct.price) return;
     setSaving(true);
@@ -179,7 +197,6 @@ export default function App() {
     setSaving(false);
     await loadProducts();
   }
-
   async function deleteProduct(id) {
     const { error } = await supabase.from("products").delete().eq("id", id);
     if (error) { alert("Erreur : " + error.message); return; }
@@ -187,8 +204,6 @@ export default function App() {
     setDeleteConfirm(null);
     await loadProducts();
   }
-
-  // ── CRUD catégories ───────────────────────────────────────────────────────
   async function addCategory() {
     const name = newCatName.trim();
     if (!name) return;
@@ -199,15 +214,9 @@ export default function App() {
     setSavingCat(false);
     await loadCategories();
   }
-
   async function deleteCategory(id, name) {
-    // Vérifie si des produits utilisent cette catégorie
     const linked = products.filter(p => p.category === name);
-    if (linked.length > 0) {
-      alert(`Impossible de supprimer "${name}" : ${linked.length} article(s) l'utilisent encore.`);
-      setDeleteCatConfirm(null);
-      return;
-    }
+    if (linked.length > 0) { alert(`Impossible de supprimer "${name}" : ${linked.length} article(s) l'utilisent encore.`); setDeleteCatConfirm(null); return; }
     const { error } = await supabase.from("categories").delete().eq("id", id);
     if (error) { alert("Erreur : " + error.message); return; }
     setDeleteCatConfirm(null);
@@ -218,9 +227,43 @@ export default function App() {
   const txToday   = transactions.filter(t => new Date(t.created_at).toDateString() === today);
   const totalJour = txToday.reduce((s,t) => s + Number(t.total), 0);
 
+  // Styles dynamiques
+  const S = {
+    app:        { minHeight:"100vh", background:C.background, fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#1a1a2e" },
+    header:     { background:C.primary, padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between", height:60, boxShadow:`0 2px 12px rgba(${hexToRgb(C.primary)},0.3)` },
+    logo:       { display:"flex", alignItems:"center", gap:12, color:"white", fontWeight:700, fontSize:18 },
+    nav:        { display:"flex", gap:4 },
+    navBtn: a => ({ display:"flex", alignItems:"center", gap:8, padding:"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontSize:14, fontWeight:a?600:400, background:a?"rgba(255,255,255,0.15)":"transparent", color:a?"white":"rgba(255,255,255,0.7)", transition:"all 0.15s" }),
+    content:    { padding:"24px", maxWidth:1400, margin:"0 auto" },
+    caisseGrid: { display:"grid", gridTemplateColumns:"1fr 400px", gap:20, alignItems:"start" },
+    card:       { background:"white", borderRadius:16, border:"1px solid #E8EAF0", overflow:"hidden" },
+    cardHeader: { padding:"16px 20px", borderBottom:"1px solid #F0F2F8", display:"flex", alignItems:"center", justifyContent:"space-between" },
+    cardTitle:  { fontWeight:700, fontSize:15, color:C.primaryDark },
+    catTabs:    { display:"flex", gap:8, padding:"12px 20px", borderBottom:"1px solid #F0F2F8", flexWrap:"wrap" },
+    catTab: a => ({ padding:"6px 16px", borderRadius:20, border:`1.5px solid ${a?C.primary:"#E0E4F0"}`, background:a?C.primary:"white", color:a?"white":"#555", fontSize:13, fontWeight:a?600:400, cursor:"pointer" }),
+    productGrid:{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))", gap:12, padding:20 },
+    productBtn: { background:"white", border:"1.5px solid #E8EAF0", borderRadius:14, padding:"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:8, transition:"all 0.12s" },
+    cartItems:  { padding:"12px 16px", maxHeight:260, overflowY:"auto" },
+    cartItem:   { display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:"1px solid #F4F6FB" },
+    qtyBtn:     { width:28, height:28, borderRadius:8, border:`1.5px solid ${C.primary}`, background:"white", color:C.primary, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:14 },
+    totalSection:{ padding:"14px 16px", borderTop:"2px solid #F0F2F8", background:C.primaryLight },
+    monnaieSection:{ padding:"14px 16px" },
+    quickAmountsGrid:{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 },
+    quickBtn:   { padding:"10px 6px", background:"white", border:`1.5px solid ${C.primary}`, borderRadius:10, color:C.primary, fontWeight:700, fontSize:13, cursor:"pointer", textAlign:"center", transition:"all 0.12s" },
+    changeDisplay: ok => ({ background:ok?"#EDFBF0":"#FFF0F0", border:`1.5px solid ${ok?"#5CB872":"#E55"}`, borderRadius:10, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }),
+    statsBar:   { background:C.primary, borderRadius:16, padding:"24px 28px", marginBottom:20, color:"white", display:"flex", alignItems:"center", justifyContent:"space-between" },
+    txCard:     { background:"white", borderRadius:14, border:"1px solid #E8EAF0", padding:"16px 20px", marginBottom:12 },
+    settingsRow:{ display:"flex", alignItems:"center", padding:"14px 20px", borderBottom:"1px solid #F0F2F8", gap:12 },
+    input:      { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", boxSizing:"border-box", background:"white" },
+    select:     { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", background:"white" },
+    iconBtn: c  => ({ width:32, height:32, borderRadius:8, border:`1.5px solid ${c}20`, background:`${c}10`, color:c, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }),
+    overlay:    { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 },
+    modal:      { background:"white", borderRadius:16, padding:32, maxWidth:420, width:"90%", textAlign:"center", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
+  };
+
   if (loading) return (
     <div style={{ ...S.app, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16 }}>
-      <Loader2 size={40} style={{ color:EVO_BLUE, animation:"spin 1s linear infinite" }} />
+      <Loader2 size={40} style={{ color:C.primary, animation:"spin 1s linear infinite" }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <p style={{ color:"#888", fontSize:15 }}>Connexion à la base de données…</p>
     </div>
@@ -240,47 +283,41 @@ export default function App() {
 
       {/* Modal suppression transaction */}
       {deleteTxConfirm && (
-        <div style={S.overlay}>
-          <div style={S.modal}>
-            <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
-            <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Supprimer cette transaction ?</h3>
-            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible.</p>
-            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
-              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={() => deleteTransaction(deleteTxConfirm)}>Supprimer</button>
-              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setDeleteTxConfirm(null)}>Annuler</button>
-            </div>
+        <div style={S.overlay}><div style={S.modal}>
+          <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
+          <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Supprimer cette transaction ?</h3>
+          <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible.</p>
+          <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+            <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={() => deleteTransaction(deleteTxConfirm)}>Supprimer</button>
+            <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setDeleteTxConfirm(null)}>Annuler</button>
           </div>
-        </div>
+        </div></div>
       )}
 
       {/* Modal vider historique */}
       {clearHistoryConfirm && (
-        <div style={S.overlay}>
-          <div style={S.modal}>
-            <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
-            <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Vider tout l'historique ?</h3>
-            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Toutes les transactions seront supprimées définitivement.</p>
-            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
-              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={clearAllHistory}>Tout supprimer</button>
-              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setClearHistoryConfirm(false)}>Annuler</button>
-            </div>
+        <div style={S.overlay}><div style={S.modal}>
+          <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
+          <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Vider tout l'historique ?</h3>
+          <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Toutes les transactions seront supprimées définitivement.</p>
+          <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+            <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={clearAllHistory}>Tout supprimer</button>
+            <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setClearHistoryConfirm(false)}>Annuler</button>
           </div>
-        </div>
+        </div></div>
       )}
 
       {/* Modal suppression catégorie */}
       {deleteCatConfirm && (
-        <div style={S.overlay}>
-          <div style={S.modal}>
-            <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
-            <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Supprimer la catégorie "{deleteCatConfirm.name}" ?</h3>
-            <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible.</p>
-            <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
-              <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={() => deleteCategory(deleteCatConfirm.id, deleteCatConfirm.name)}>Supprimer</button>
-              <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setDeleteCatConfirm(null)}>Annuler</button>
-            </div>
+        <div style={S.overlay}><div style={S.modal}>
+          <AlertTriangle size={40} style={{ color:"#CC3333", marginBottom:16 }} />
+          <h3 style={{ margin:"0 0 8px", fontSize:18 }}>Supprimer "{deleteCatConfirm.name}" ?</h3>
+          <p style={{ color:"#888", fontSize:14, margin:"0 0 24px" }}>Cette action est irréversible.</p>
+          <div style={{ display:"flex", gap:12, justifyContent:"center" }}>
+            <button style={{ padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }} onClick={() => deleteCategory(deleteCatConfirm.id, deleteCatConfirm.name)}>Supprimer</button>
+            <button style={{ padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }} onClick={() => setDeleteCatConfirm(null)}>Annuler</button>
           </div>
-        </div>
+        </div></div>
       )}
 
       {/* HEADER */}
@@ -288,7 +325,7 @@ export default function App() {
         <div style={S.logo}>
           <span style={{ fontSize:28 }}>🏆</span>
           <div>
-            <span style={{ color:EVO_GOLD }}>ÉVOLUTION</span>
+            <span style={{ color:C.accent }}>ÉVOLUTION</span>
             <span style={{ color:"white", marginLeft:6 }}>DE MORTEAU</span>
             <div style={{ fontSize:11, fontWeight:400, color:"rgba(255,255,255,0.6)", letterSpacing:"0.1em" }}>CAISSE ENREGISTREUSE</div>
           </div>
@@ -317,19 +354,17 @@ export default function App() {
                 <span style={{ fontSize:13, color:"#888" }}>{filtered.length} articles</span>
               </div>
               <div style={S.catTabs}>
-                {catTabs.map(c => (
-                  <button key={c} style={S.catTab(selectedCat===c)} onClick={() => setSelectedCat(c)}>{c}</button>
-                ))}
+                {catTabs.map(c => <button key={c} style={S.catTab(selectedCat===c)} onClick={() => setSelectedCat(c)}>{c}</button>)}
               </div>
               <div style={S.productGrid}>
                 {filtered.map(p => (
                   <button key={p.id} style={S.productBtn} onClick={() => addToCart(p)}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor=EVO_BLUE; e.currentTarget.style.background=EVO_BLUE_LIGHT; e.currentTarget.style.transform="translateY(-2px)"; }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor=C.primary; e.currentTarget.style.background=C.primaryLight; e.currentTarget.style.transform="translateY(-2px)"; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background="white"; e.currentTarget.style.transform="none"; }}
                   >
                     <span style={{ fontSize:32, lineHeight:1 }}>{p.emoji}</span>
                     <span style={{ fontSize:13, fontWeight:600, color:"#2a2a3e", lineHeight:1.3 }}>{p.name}</span>
-                    <span style={{ fontSize:14, fontWeight:700, color:EVO_BLUE }}>{formatPrice(p.price)}</span>
+                    <span style={{ fontSize:14, fontWeight:700, color:C.primary }}>{formatPrice(p.price)}</span>
                   </button>
                 ))}
               </div>
@@ -359,7 +394,7 @@ export default function App() {
                         <button style={S.qtyBtn} onClick={() => updateQty(item.id,-1)}><Minus size={12}/></button>
                         <span style={{ fontSize:15, fontWeight:700, minWidth:20, textAlign:"center" }}>{item.qty}</span>
                         <button style={S.qtyBtn} onClick={() => updateQty(item.id,1)}><Plus size={12}/></button>
-                        <span style={{ fontSize:14, fontWeight:600, color:EVO_BLUE, minWidth:60, textAlign:"right" }}>{formatPrice(item.price*item.qty)}</span>
+                        <span style={{ fontSize:14, fontWeight:600, color:C.primary, minWidth:60, textAlign:"right" }}>{formatPrice(item.price*item.qty)}</span>
                         <button style={{ ...S.iconBtn("#CC3333"), border:"none" }} onClick={() => setCart(prev=>prev.filter(i=>i.id!==item.id))}><X size={13}/></button>
                       </div>
                     ))}
@@ -367,8 +402,8 @@ export default function App() {
                 )}
                 <div style={S.totalSection}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                    <span style={{ fontSize:15, fontWeight:600, color:EVO_BLUE_DARK }}>TOTAL À RÉGLER</span>
-                    <span style={{ fontSize:22, fontWeight:800, color:EVO_BLUE_DARK }}>{formatPrice(cartTotal)}</span>
+                    <span style={{ fontSize:15, fontWeight:600, color:C.primaryDark }}>TOTAL À RÉGLER</span>
+                    <span style={{ fontSize:22, fontWeight:800, color:C.primaryDark }}>{formatPrice(cartTotal)}</span>
                   </div>
                 </div>
               </div>
@@ -386,8 +421,8 @@ export default function App() {
                         {QUICK_AMOUNTS.map(a => (
                           <button key={a} style={S.quickBtn}
                             onClick={() => setAmountGiven(prev => Math.round((prev+a)*100)/100)}
-                            onMouseEnter={e => { e.currentTarget.style.background=EVO_BLUE; e.currentTarget.style.color="white"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background="white"; e.currentTarget.style.color=EVO_BLUE; }}
+                            onMouseEnter={e => { e.currentTarget.style.background=C.primary; e.currentTarget.style.color="white"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background="white"; e.currentTarget.style.color=C.primary; }}
                           >
                             {a < 1 ? `${Math.round(a*100)} c` : `${a} €`}
                           </button>
@@ -406,10 +441,10 @@ export default function App() {
                           <span style={{ fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828" }}>{formatPrice(Math.abs(change))}</span>
                         </div>
                       )}
-                      <button style={{ width:"100%", padding:"16px", background:canEncaisser?EVO_GOLD:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}
+                      <button style={{ width:"100%", padding:"16px", background:canEncaisser?C.accent:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}
                         onClick={goToConfirmation}
-                        onMouseEnter={e => { if(canEncaisser) e.currentTarget.style.background="#e09800"; }}
-                        onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=canEncaisser?EVO_GOLD:"#C8D0E8"; }}
+                        onMouseEnter={e => { if(canEncaisser) e.currentTarget.style.background=darken(C.accent,0.1); }}
+                        onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=C.accent; }}
                       >
                         <ArrowRight size={20}/> Valider le calcul
                       </button>
@@ -417,7 +452,7 @@ export default function App() {
                   </>
                 ) : (
                   <div>
-                    <div style={{ background:EVO_BLUE, borderRadius:"14px 14px 0 0", padding:"18px 20px 14px" }}>
+                    <div style={{ background:C.primary, borderRadius:"14px 14px 0 0", padding:"18px 20px 14px" }}>
                       <div style={{ fontSize:12, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>Étape 2/2 — Remise de monnaie</div>
                       <div style={{ color:"white", fontSize:15, fontWeight:600 }}>Total : {formatPrice(cartTotal)} · Reçu : {formatPrice(amountGiven)}</div>
                     </div>
@@ -426,8 +461,8 @@ export default function App() {
                         <><div style={{ fontSize:48, marginBottom:8 }}>✅</div><div style={{ fontSize:16, color:"#2E7D32", fontWeight:600, marginBottom:4 }}>Compte exact</div><div style={{ fontSize:13, color:"#888" }}>Aucune monnaie à rendre</div></>
                       ) : (
                         <><div style={{ fontSize:13, color:"#555", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:12 }}>Monnaie à rendre</div>
-                        <div style={{ fontSize:72, fontWeight:900, color:EVO_BLUE_DARK, lineHeight:1, letterSpacing:"-2px", marginBottom:6 }}>{formatPrice(change)}</div>
-                        <div style={{ fontSize:14, color:"#888" }}>{formatPrice(amountGiven)} − {formatPrice(cartTotal)} = <strong style={{ color:EVO_BLUE }}>{formatPrice(change)}</strong></div></>
+                        <div style={{ fontSize:72, fontWeight:900, color:C.primaryDark, lineHeight:1, letterSpacing:"-2px", marginBottom:6 }}>{formatPrice(change)}</div>
+                        <div style={{ fontSize:14, color:"#888" }}>{formatPrice(amountGiven)} − {formatPrice(cartTotal)} = <strong style={{ color:C.primary }}>{formatPrice(change)}</strong></div></>
                       )}
                     </div>
                     <div style={{ padding:"12px 20px", borderBottom:"1px solid #F0F2F8", maxHeight:130, overflowY:"auto" }}>
@@ -439,10 +474,10 @@ export default function App() {
                       ))}
                     </div>
                     <div style={{ padding:"16px 20px", display:"flex", flexDirection:"column", gap:10 }}>
-                      <button style={{ width:"100%", padding:"18px", background:EVO_BLUE, color:"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}
+                      <button style={{ width:"100%", padding:"18px", background:C.primary, color:"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}
                         onClick={confirmerRemise}
-                        onMouseEnter={e => { e.currentTarget.style.background=EVO_BLUE_DARK; }}
-                        onMouseLeave={e => { e.currentTarget.style.background=EVO_BLUE; }}
+                        onMouseEnter={e => { e.currentTarget.style.background=C.primaryDark; }}
+                        onMouseLeave={e => { e.currentTarget.style.background=C.primary; }}
                       >
                         <CheckCircle size={22}/> Monnaie remise — Terminer
                       </button>
@@ -463,16 +498,16 @@ export default function App() {
             <div style={S.statsBar}>
               <div style={{ textAlign:"center" }}>
                 <div style={{ fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>CA du jour</div>
-                <div style={{ fontSize:32, fontWeight:800, color:EVO_GOLD }}>{formatPrice(totalJour)}</div>
+                <div style={{ fontSize:32, fontWeight:800, color:C.accent }}>{formatPrice(totalJour)}</div>
               </div>
               <div style={{ display:"flex", gap:32, alignItems:"center" }}>
                 <div style={{ textAlign:"center" }}>
                   <div style={{ fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Transactions aujourd'hui</div>
-                  <div style={{ fontSize:22, fontWeight:800, color:EVO_GOLD }}>{txToday.length}</div>
+                  <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>{txToday.length}</div>
                 </div>
                 <div style={{ textAlign:"center" }}>
                   <div style={{ fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>Panier moyen</div>
-                  <div style={{ fontSize:22, fontWeight:800, color:EVO_GOLD }}>{txToday.length > 0 ? formatPrice(totalJour/txToday.length) : "–"}</div>
+                  <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>{txToday.length > 0 ? formatPrice(totalJour/txToday.length) : "–"}</div>
                 </div>
                 {transactions.length > 0 && (
                   <button style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer" }}
@@ -496,8 +531,8 @@ export default function App() {
                       <span style={{ marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666" }}>#{transactions.length - i}</span>
                     </div>
                     <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                      <span style={{ fontSize:18, fontWeight:800, color:EVO_BLUE_DARK }}>{formatPrice(tx.total)}</span>
-                      <button style={{ ...S.iconBtn("#CC3333"), border:"none" }} onClick={() => setDeleteTxConfirm(tx.id)} title="Supprimer"><Trash2 size={14}/></button>
+                      <span style={{ fontSize:18, fontWeight:800, color:C.primaryDark }}>{formatPrice(tx.total)}</span>
+                      <button style={{ ...S.iconBtn("#CC3333"), border:"none" }} onClick={() => setDeleteTxConfirm(tx.id)}><Trash2 size={14}/></button>
                     </div>
                   </div>
                   <div style={{ fontSize:13, color:"#555", borderTop:"1px solid #F0F2F8", paddingTop:10, display:"flex", flexWrap:"wrap", gap:"4px 12px" }}>
@@ -517,45 +552,90 @@ export default function App() {
         {tab === "parametres" && (
           <div>
 
-            {/* ── Section catégories ── */}
+            {/* ── Section Apparence ── */}
             <div style={{ marginBottom:28 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-                <div>
-                  <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:EVO_BLUE_DARK }}>Catégories</h2>
-                  <p style={{ margin:"4px 0 0", color:"#888", fontSize:14 }}>{categories.length} catégorie(s)</p>
-                </div>
+              <div style={{ marginBottom:16 }}>
+                <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:C.primaryDark }}>Apparence</h2>
+                <p style={{ margin:"4px 0 0", color:"#888", fontSize:14 }}>Personnalise les couleurs de l'application</p>
               </div>
               <div style={S.card}>
-                {/* Ligne d'ajout */}
+                <div style={{ padding:"20px", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:20 }}>
+                  {[
+                    { label:"Couleur principale", key:"primary", hint:"Header, boutons, onglets" },
+                    { label:"Couleur accent",     key:"accent",  hint:"Bouton valider, stats CA" },
+                    { label:"Couleur de fond",    key:"background", hint:"Arrière-plan de l'app" },
+                  ].map(item => (
+                    <div key={item.key}>
+                      <label style={{ fontSize:13, fontWeight:600, color:"#444", display:"block", marginBottom:4 }}>{item.label}</label>
+                      <p style={{ fontSize:12, color:"#999", margin:"0 0 10px" }}>{item.hint}</p>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <div style={{ position:"relative", width:48, height:48, borderRadius:10, overflow:"hidden", border:"2px solid #E0E4F0", flexShrink:0 }}>
+                          <input type="color" value={colors[item.key]}
+                            onChange={e => setColors(prev => ({ ...prev, [item.key]: e.target.value }))}
+                            style={{ position:"absolute", inset:"-8px", width:"calc(100% + 16px)", height:"calc(100% + 16px)", cursor:"pointer", border:"none", padding:0 }}
+                          />
+                        </div>
+                        <input style={{ ...S.input, fontFamily:"monospace", fontSize:13, margin:0 }}
+                          value={colors[item.key]}
+                          onChange={e => { if(/^#[0-9A-Fa-f]{0,6}$/.test(e.target.value)) setColors(prev => ({ ...prev, [item.key]: e.target.value })); }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Aperçu */}
+                <div style={{ margin:"0 20px 20px", padding:16, background:C.background, borderRadius:12, border:"1px solid #E8EAF0" }}>
+                  <div style={{ fontSize:12, color:"#888", fontWeight:600, marginBottom:10, textTransform:"uppercase", letterSpacing:"0.06em" }}>Aperçu</div>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                    <div style={{ background:C.primary, color:"white", padding:"8px 16px", borderRadius:8, fontSize:13, fontWeight:600 }}>Bouton principal</div>
+                    <div style={{ background:C.accent, color:"#1a1000", padding:"8px 16px", borderRadius:8, fontSize:13, fontWeight:600 }}>Bouton accent</div>
+                    <div style={{ background:C.primaryLight, color:C.primaryDark, padding:"8px 16px", borderRadius:8, fontSize:13, fontWeight:600 }}>Total à régler</div>
+                    <div style={{ border:`1.5px solid ${C.primary}`, color:C.primary, padding:"6px 14px", borderRadius:20, fontSize:13, fontWeight:600 }}>Onglet actif</div>
+                  </div>
+                </div>
+
+                <div style={{ padding:"0 20px 20px", display:"flex", gap:10 }}>
+                  <button style={{ display:"flex", alignItems:"center", gap:6, padding:"10px 20px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }}
+                    onClick={saveColors} disabled={savingColors}>
+                    {savingColors ? <Loader2 size={14} style={{ animation:"spin 1s linear infinite" }}/> : <Save size={14}/>} Enregistrer
+                  </button>
+                  <button style={{ display:"flex", alignItems:"center", gap:6, padding:"10px 16px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer" }}
+                    onClick={resetColors}>
+                    <RotateCcw size={14}/> Réinitialiser
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section catégories ── */}
+            <div style={{ marginBottom:28 }}>
+              <div style={{ marginBottom:16 }}>
+                <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:C.primaryDark }}>Catégories</h2>
+                <p style={{ margin:"4px 0 0", color:"#888", fontSize:14 }}>{categories.length} catégorie(s)</p>
+              </div>
+              <div style={S.card}>
                 <div style={{ padding:"14px 20px", borderBottom:"1px solid #F0F2F8", display:"flex", gap:10, alignItems:"center" }}>
-                  <Tag size={18} style={{ color:EVO_BLUE, flexShrink:0 }} />
-                  <input
-                    style={{ ...S.input, margin:0 }}
-                    placeholder="Nouvelle catégorie (ex: Apéro, Dessert…)"
-                    value={newCatName}
-                    onChange={e => setNewCatName(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && addCategory()}
-                  />
-                  <button style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:EVO_BLUE, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}
+                  <Tag size={18} style={{ color:C.primary, flexShrink:0 }} />
+                  <input style={{ ...S.input, margin:0 }} placeholder="Nouvelle catégorie (ex: Apéro, Dessert…)"
+                    value={newCatName} onChange={e => setNewCatName(e.target.value)} onKeyDown={e => e.key === "Enter" && addCategory()}/>
+                  <button style={{ display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}
                     onClick={addCategory} disabled={savingCat}>
                     {savingCat ? <Loader2 size={13} style={{ animation:"spin 1s linear infinite" }}/> : <Plus size={13}/>} Ajouter
                   </button>
                 </div>
-                {/* Liste des catégories */}
                 {categories.length === 0 ? (
                   <div style={{ padding:"20px", textAlign:"center", color:"#AAB", fontSize:14 }}>Aucune catégorie</div>
                 ) : (
                   categories.map(cat => (
                     <div key={cat.id} style={{ ...S.settingsRow, background: deleteCatConfirm?.id===cat.id ? "#FFF8F8" : "transparent" }}>
-                      <Tag size={16} style={{ color:EVO_BLUE, flexShrink:0 }} />
+                      <Tag size={16} style={{ color:C.primary, flexShrink:0 }} />
                       <span style={{ flex:1, fontWeight:600, fontSize:14 }}>{cat.name}</span>
-                      <span style={{ fontSize:12, color:"#AAB" }}>
-                        {products.filter(p => p.category === cat.name).length} article(s)
-                      </span>
+                      <span style={{ fontSize:12, color:"#AAB" }}>{products.filter(p => p.category === cat.name).length} article(s)</span>
                       {deleteCatConfirm?.id === cat.id ? (
                         <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                           <span style={{ fontSize:12, color:"#CC3333", fontWeight:600 }}>Supprimer ?</span>
-                          <button style={{ ...S.iconBtn("#CC3333"), border:"none", background:"#CC3333", color:"white" }} onClick={() => setDeleteCatConfirm(cat)}><CheckCircle size={14}/></button>
+                          <button style={{ ...S.iconBtn("#CC3333"), border:"none", background:"#CC3333", color:"white" }} onClick={() => deleteCategory(deleteCatConfirm.id, deleteCatConfirm.name)}><CheckCircle size={14}/></button>
                           <button style={{ ...S.iconBtn("#666"), border:"none" }} onClick={() => setDeleteCatConfirm(null)}><X size={14}/></button>
                         </div>
                       ) : (
@@ -570,10 +650,10 @@ export default function App() {
             {/* ── Section articles ── */}
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
               <div>
-                <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:EVO_BLUE_DARK }}>Articles</h2>
+                <h2 style={{ margin:0, fontSize:20, fontWeight:700, color:C.primaryDark }}>Articles</h2>
                 <p style={{ margin:"4px 0 0", color:"#888", fontSize:14 }}>{products.length} article(s) configuré(s)</p>
               </div>
-              <button style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 18px", background:EVO_BLUE, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:600, cursor:"pointer" }}
+              <button style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 18px", background:C.primary, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:600, cursor:"pointer" }}
                 onClick={() => { setShowAddForm(!showAddForm); setEditingProduct(null); }}>
                 <Plus size={16}/> Ajouter un article
               </button>
@@ -603,7 +683,7 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ padding:"0 20px 20px", display:"flex", gap:10 }}>
-                  <button style={{ display:"flex", alignItems:"center", gap:6, padding:"10px 20px", background:EVO_BLUE, color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }}
+                  <button style={{ display:"flex", alignItems:"center", gap:6, padding:"10px 20px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer" }}
                     onClick={addProduct} disabled={saving}>
                     {saving ? <Loader2 size={14} style={{ animation:"spin 1s linear infinite" }}/> : <Save size={14}/>} Enregistrer
                   </button>
@@ -625,7 +705,7 @@ export default function App() {
                       </select>
                     </div>
                     <div style={{ display:"flex", gap:8, marginTop:10 }}>
-                      <button style={{ display:"flex", alignItems:"center", gap:5, padding:"7px 14px", background:EVO_BLUE, color:"white", border:"none", borderRadius:7, fontSize:13, fontWeight:600, cursor:"pointer" }}
+                      <button style={{ display:"flex", alignItems:"center", gap:5, padding:"7px 14px", background:C.primary, color:"white", border:"none", borderRadius:7, fontSize:13, fontWeight:600, cursor:"pointer" }}
                         onClick={saveEdit} disabled={saving}>
                         {saving ? <Loader2 size={13} style={{ animation:"spin 1s linear infinite" }}/> : <Save size={13}/>} Enregistrer
                       </button>
@@ -636,8 +716,8 @@ export default function App() {
                   <div key={p.id} style={{ ...S.settingsRow, background:deleteConfirm===p.id?"#FFF8F8":"transparent" }}>
                     <span style={{ fontSize:24, width:36, textAlign:"center" }}>{p.emoji}</span>
                     <span style={{ flex:1, fontWeight:600, fontSize:14 }}>{p.name}</span>
-                    <span style={{ fontSize:12, background:EVO_BLUE_LIGHT, color:EVO_BLUE, padding:"3px 10px", borderRadius:20, fontWeight:500 }}>{p.category}</span>
-                    <span style={{ fontWeight:700, color:EVO_BLUE, fontSize:14, minWidth:60, textAlign:"right" }}>{formatPrice(p.price)}</span>
+                    <span style={{ fontSize:12, background:C.primaryLight, color:C.primary, padding:"3px 10px", borderRadius:20, fontWeight:500 }}>{p.category}</span>
+                    <span style={{ fontWeight:700, color:C.primary, fontSize:14, minWidth:60, textAlign:"right" }}>{formatPrice(p.price)}</span>
                     {deleteConfirm === p.id ? (
                       <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                         <span style={{ fontSize:12, color:"#CC3333", fontWeight:600 }}>Supprimer ?</span>
@@ -646,7 +726,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div style={{ display:"flex", gap:6 }}>
-                        <button style={S.iconBtn(EVO_BLUE)} onClick={() => { setEditingProduct({...p}); setShowAddForm(false); }}><Edit3 size={14}/></button>
+                        <button style={S.iconBtn(C.primary)} onClick={() => { setEditingProduct({...p}); setShowAddForm(false); }}><Edit3 size={14}/></button>
                         <button style={S.iconBtn("#CC3333")} onClick={() => setDeleteConfirm(p.id)}><Trash2 size={14}/></button>
                       </div>
                     )}
