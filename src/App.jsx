@@ -3,7 +3,8 @@ import { supabase } from "./supabase";
 import {
   ShoppingCart, Clock, Settings, Plus, Minus, Trash2,
   CheckCircle, Edit3, X, Save, ArrowRight, RotateCcw,
-  Loader2, WifiOff, AlertTriangle, Tag, Palette, Package
+  Loader2, WifiOff, AlertTriangle, Tag, Palette, Package,
+  Monitor, Tablet, Smartphone
 } from "lucide-react";
 
 const DEFAULTS = { primary:"#003B8E", accent:"#F5A623", background:"#F4F6FB" };
@@ -28,35 +29,94 @@ function formatPrice(p) { return Number(p).toFixed(2).replace(".",",")+" €"; }
 function formatTime(d)  { return new Date(d).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}); }
 function formatDate(d)  { return new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}); }
 
+const DEVICES = [
+  { key:"desktop",        label:"Ordinateur",      sublabel:"Grand écran, souris & clavier", Icon:Monitor    },
+  { key:"ipad",           label:"iPad",             sublabel:"Tablette Apple",               Icon:Tablet     },
+  { key:"android-tablet", label:"Tablette Android", sublabel:"Tablette sous Android",        Icon:Tablet     },
+  { key:"iphone",         label:"iPhone",           sublabel:"Téléphone Apple",              Icon:Smartphone },
+  { key:"android-phone",  label:"Android",          sublabel:"Téléphone sous Android",       Icon:Smartphone },
+];
+
+function DeviceSelector({ onSelect }) {
+  const [hovered, setHovered] = useState(null);
+  return (
+    <div style={{
+      minHeight:"100vh", background:DEFAULTS.background,
+      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+      fontFamily:"'Segoe UI',system-ui,sans-serif", padding:"24px"
+    }}>
+      <div style={{ textAlign:"center", marginBottom:48 }}>
+        <div style={{ fontSize:56, marginBottom:16 }}>🏆</div>
+        <h1 style={{ margin:0, fontSize:28, fontWeight:800, color:DEFAULTS.primary }}>
+          <span style={{ color:DEFAULTS.accent }}>ÉVOLUTION</span> DE MORTEAU
+        </h1>
+        <p style={{ margin:"10px 0 0", color:"#888", fontSize:15 }}>
+          Sélectionnez votre type d'appareil pour une interface optimisée
+        </p>
+      </div>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:16, justifyContent:"center", maxWidth:900 }}>
+        {DEVICES.map(({ key, label, sublabel, Icon }) => (
+          <button
+            key={key}
+            onClick={() => onSelect(key)}
+            onMouseEnter={() => setHovered(key)}
+            onMouseLeave={() => setHovered(null)}
+            style={{
+              display:"flex", flexDirection:"column", alignItems:"center", gap:14,
+              padding:"28px 36px", borderRadius:20,
+              border:`2px solid ${hovered===key ? DEFAULTS.primary : "#E0E4F0"}`,
+              background: hovered===key ? DEFAULTS.primary : "white",
+              color: hovered===key ? "white" : "#1a1a2e",
+              cursor:"pointer", transition:"all 0.18s", minWidth:150,
+              boxShadow: hovered===key ? "0 8px 28px rgba(0,59,142,0.25)" : "0 2px 8px rgba(0,0,0,0.06)"
+            }}
+          >
+            <Icon size={40}/>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontWeight:700, fontSize:16 }}>{label}</div>
+              <div style={{ fontSize:12, opacity:0.72, marginTop:4 }}>{sublabel}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const [tab, setTab]                   = useState("caisse");
-  const [settingsTab, setSettingsTab]   = useState("apparence"); // sous-onglet paramètres
-  const [products, setProducts]         = useState([]);
-  const [categories, setCategories]     = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [dbError, setDbError]           = useState(false);
+  const [device, setDevice]              = useState(null);
+  const [mobileTab, setMobileTab]        = useState("produits");
+  const [tab, setTab]                    = useState("caisse");
+  const [settingsTab, setSettingsTab]    = useState("apparence");
+  const [products, setProducts]          = useState([]);
+  const [categories, setCategories]      = useState([]);
+  const [transactions, setTransactions]  = useState([]);
+  const [loading, setLoading]            = useState(true);
+  const [dbError, setDbError]            = useState(false);
 
-  const [cart, setCart]                 = useState([]);
-  const [selectedCat, setSelectedCat]  = useState("Tous");
-  const [amountGiven, setAmountGiven]   = useState(0);
-  const [encaisseStep, setEncaisseStep] = useState("saisie");
+  const [cart, setCart]                  = useState([]);
+  const [selectedCat, setSelectedCat]   = useState("Tous");
+  const [amountGiven, setAmountGiven]    = useState(0);
+  const [encaisseStep, setEncaisseStep]  = useState("saisie");
 
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [newProduct, setNewProduct]         = useState({ name:"", price:"", category:"", emoji:"🛒" });
-  const [showAddForm, setShowAddForm]       = useState(false);
-  const [deleteConfirm, setDeleteConfirm]   = useState(null);
-  const [saving, setSaving]                 = useState(false);
+  const [editingProduct, setEditingProduct]  = useState(null);
+  const [newProduct, setNewProduct]          = useState({ name:"", price:"", category:"", emoji:"🛒" });
+  const [showAddForm, setShowAddForm]        = useState(false);
+  const [deleteConfirm, setDeleteConfirm]    = useState(null);
+  const [saving, setSaving]                  = useState(false);
 
   const [deleteTxConfirm, setDeleteTxConfirm]         = useState(null);
   const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
 
-  const [newCatName, setNewCatName]             = useState("");
-  const [deleteCatConfirm, setDeleteCatConfirm] = useState(null);
-  const [savingCat, setSavingCat]               = useState(false);
+  const [newCatName, setNewCatName]              = useState("");
+  const [deleteCatConfirm, setDeleteCatConfirm]  = useState(null);
+  const [savingCat, setSavingCat]                = useState(false);
 
-  const [colors, setColors]         = useState({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background });
+  const [colors, setColors]           = useState({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background });
   const [savingColors, setSavingColors] = useState(false);
+
+  const isMobile = device === "iphone" || device === "android-phone";
+  const isTablet = device === "ipad" || device === "android-tablet";
 
   const C = {
     primary:      colors.primary,
@@ -199,41 +259,46 @@ export default function App() {
   const txToday   = transactions.filter(t => new Date(t.created_at).toDateString() === today);
   const totalJour = txToday.reduce((s,t) => s+Number(t.total), 0);
 
+  const qtySize = isMobile ? 42 : isTablet ? 34 : 28;
+
   const S = {
     app:         { minHeight:"100vh", background:C.background, fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#1a1a2e" },
-    header:      { background:C.primary, padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between", height:60, boxShadow:`0 2px 12px rgba(${hexToRgb(C.primary)},0.3)` },
-    logo:        { display:"flex", alignItems:"center", gap:12, color:"white", fontWeight:700, fontSize:18 },
-    nav:         { display:"flex", gap:4 },
-    navBtn: a => ({ display:"flex", alignItems:"center", gap:8, padding:"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontSize:14, fontWeight:a?600:400, background:a?"rgba(255,255,255,0.15)":"transparent", color:a?"white":"rgba(255,255,255,0.7)", transition:"all 0.15s" }),
-    content:     { padding:"24px", maxWidth:1400, margin:"0 auto" },
-    caisseGrid:  { display:"grid", gridTemplateColumns:"1fr 400px", gap:20, alignItems:"start" },
+    header:      { background:C.primary, padding:`0 ${isMobile?"12px":"24px"}`, display:"flex", alignItems:"center", justifyContent:"space-between", height:isMobile?56:60, boxShadow:`0 2px 12px rgba(${hexToRgb(C.primary)},0.3)` },
+    logo:        { display:"flex", alignItems:"center", gap:isMobile?8:12, color:"white", fontWeight:700, fontSize:isMobile?15:18 },
+    nav:         { display:"flex", gap:isMobile?2:4 },
+    navBtn: a => ({ display:"flex", alignItems:"center", gap:isMobile?0:8, padding:isMobile?"10px 12px":isTablet?"10px 16px":"8px 18px", borderRadius:8, border:"none", cursor:"pointer", fontSize:isMobile?13:14, fontWeight:a?600:400, background:a?"rgba(255,255,255,0.15)":"transparent", color:a?"white":"rgba(255,255,255,0.7)", transition:"all 0.15s" }),
+    content:     { padding:isMobile?"12px":"24px", maxWidth:1400, margin:"0 auto" },
+    caisseGrid:  isMobile
+      ? { display:"flex", flexDirection:"column", gap:16 }
+      : { display:"grid", gridTemplateColumns:isTablet?"1fr 420px":"1fr 400px", gap:20, alignItems:"start" },
     card:        { background:"white", borderRadius:16, border:"1px solid #E8EAF0", overflow:"hidden" },
-    cardHeader:  { padding:"16px 20px", borderBottom:"1px solid #F0F2F8", display:"flex", alignItems:"center", justifyContent:"space-between" },
-    cardTitle:   { fontWeight:700, fontSize:15, color:C.primaryDark },
-    catTabs:     { display:"flex", gap:8, padding:"12px 20px", borderBottom:"1px solid #F0F2F8", flexWrap:"wrap" },
-    catTab: a => ({ padding:"6px 16px", borderRadius:20, border:`1.5px solid ${a?C.primary:"#E0E4F0"}`, background:a?C.primary:"white", color:a?"white":"#555", fontSize:13, fontWeight:a?600:400, cursor:"pointer" }),
-    productGrid: { display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))", gap:12, padding:20 },
-    productBtn:  { background:"white", border:"1.5px solid #E8EAF0", borderRadius:14, padding:"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:8, transition:"all 0.12s" },
-    cartItems:   { padding:"12px 16px", maxHeight:260, overflowY:"auto" },
-    cartItem:    { display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:"1px solid #F4F6FB" },
-    qtyBtn:      { width:28, height:28, borderRadius:8, border:`1.5px solid ${C.primary}`, background:"white", color:C.primary, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:14 },
-    totalSection:{ padding:"14px 16px", borderTop:"2px solid #F0F2F8", background:C.primaryLight },
-    monnaieSection:{ padding:"14px 16px" },
-    quickGrid:   { display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 },
-    quickBtn:    { padding:"10px 6px", background:"white", border:`1.5px solid ${C.primary}`, borderRadius:10, color:C.primary, fontWeight:700, fontSize:13, cursor:"pointer", textAlign:"center", transition:"all 0.12s" },
+    cardHeader:  { padding:isMobile?"12px 16px":"16px 20px", borderBottom:"1px solid #F0F2F8", display:"flex", alignItems:"center", justifyContent:"space-between" },
+    cardTitle:   { fontWeight:700, fontSize:isMobile?14:15, color:C.primaryDark },
+    catTabs:     { display:"flex", gap:isMobile?6:8, padding:isMobile?"10px 12px":"12px 20px", borderBottom:"1px solid #F0F2F8", flexWrap:"wrap" },
+    catTab: a => ({ padding:isMobile?"9px 14px":isTablet?"8px 16px":"6px 16px", borderRadius:20, border:`1.5px solid ${a?C.primary:"#E0E4F0"}`, background:a?C.primary:"white", color:a?"white":"#555", fontSize:isMobile?14:13, fontWeight:a?600:400, cursor:"pointer" }),
+    productGrid: { display:"grid", gridTemplateColumns:isMobile?"repeat(3,1fr)":isTablet?"repeat(auto-fill,minmax(155px,1fr))":"repeat(auto-fill,minmax(140px,1fr))", gap:isMobile?10:12, padding:isMobile?12:20 },
+    productBtn:  { background:"white", border:"1.5px solid #E8EAF0", borderRadius:14, padding:isMobile?"14px 8px":isTablet?"18px 12px":"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:isMobile?6:8, transition:"all 0.12s" },
+    cartItems:   { padding:isMobile?"10px 12px":"12px 16px", maxHeight:isMobile?220:260, overflowY:"auto" },
+    cartItem:    { display:"flex", alignItems:"center", gap:isMobile?8:10, padding:"10px 0", borderBottom:"1px solid #F4F6FB" },
+    qtyBtn:      { width:qtySize, height:qtySize, borderRadius:8, border:`1.5px solid ${C.primary}`, background:"white", color:C.primary, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:isMobile?16:14 },
+    totalSection:{ padding:isMobile?"12px 14px":"14px 16px", borderTop:"2px solid #F0F2F8", background:C.primaryLight },
+    monnaieSection:{ padding:isMobile?"12px":"14px 16px" },
+    quickGrid:   { display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:isMobile?10:8, marginBottom:12 },
+    quickBtn:    { padding:isMobile?"15px 6px":isTablet?"13px 6px":"10px 6px", background:"white", border:`1.5px solid ${C.primary}`, borderRadius:10, color:C.primary, fontWeight:700, fontSize:isMobile?16:isTablet?14:13, cursor:"pointer", textAlign:"center", transition:"all 0.12s" },
     changeDisplay: ok => ({ background:ok?"#EDFBF0":"#FFF0F0", border:`1.5px solid ${ok?"#5CB872":"#E55"}`, borderRadius:10, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }),
-    statsBar:    { background:C.primary, borderRadius:16, padding:"24px 28px", marginBottom:20, color:"white", display:"flex", alignItems:"center", justifyContent:"space-between" },
-    txCard:      { background:"white", borderRadius:14, border:"1px solid #E8EAF0", padding:"16px 20px", marginBottom:12 },
-    settingsRow: { display:"flex", alignItems:"center", padding:"14px 20px", borderBottom:"1px solid #F0F2F8", gap:12 },
-    input:       { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", boxSizing:"border-box", background:"white" },
-    select:      { width:"100%", padding:"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:14, outline:"none", background:"white" },
-    iconBtn: c  => ({ width:32, height:32, borderRadius:8, border:`1.5px solid ${c}20`, background:`${c}10`, color:c, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }),
+    statsBar:    { background:C.primary, borderRadius:16, padding:isMobile?"16px":"24px 28px", marginBottom:20, color:"white", display:"flex", flexDirection:isMobile?"column":"row", alignItems:isMobile?"flex-start":"center", justifyContent:"space-between", gap:isMobile?16:0 },
+    txCard:      { background:"white", borderRadius:14, border:"1px solid #E8EAF0", padding:isMobile?"12px 14px":"16px 20px", marginBottom:12 },
+    settingsRow: { display:"flex", alignItems:"center", padding:isMobile?"12px 16px":"14px 20px", borderBottom:"1px solid #F0F2F8", gap:12 },
+    input:       { width:"100%", padding:isMobile?"12px":"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:isMobile?15:14, outline:"none", boxSizing:"border-box", background:"white" },
+    select:      { width:"100%", padding:isMobile?"12px":"9px 12px", borderRadius:8, border:"1.5px solid #D0D6E8", fontSize:isMobile?15:14, outline:"none", background:"white" },
+    iconBtn: c  => ({ width:isMobile?38:32, height:isMobile?38:32, borderRadius:8, border:`1.5px solid ${c}20`, background:`${c}10`, color:c, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }),
     overlay:     { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 },
-    modal:       { background:"white", borderRadius:16, padding:32, maxWidth:420, width:"90%", textAlign:"center", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
-    // Sous-onglets paramètres
-    subTabBar:   { display:"flex", gap:4, marginBottom:24, background:"white", borderRadius:12, padding:6, border:"1px solid #E8EAF0", width:"fit-content" },
-    subTab: a => ({ display:"flex", alignItems:"center", gap:8, padding:"10px 20px", borderRadius:8, border:"none", cursor:"pointer", fontSize:14, fontWeight:a?600:500, background:a?C.primary:"transparent", color:a?"white":"#666", transition:"all 0.15s" }),
+    modal:       { background:"white", borderRadius:16, padding:isMobile?20:32, maxWidth:420, width:"90%", textAlign:"center", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
+    subTabBar:   { display:"flex", gap:4, marginBottom:24, background:"white", borderRadius:12, padding:6, border:"1px solid #E8EAF0", width:"fit-content", flexWrap:"wrap" },
+    subTab: a => ({ display:"flex", alignItems:"center", gap:8, padding:isMobile?"10px 14px":"10px 20px", borderRadius:8, border:"none", cursor:"pointer", fontSize:isMobile?13:14, fontWeight:a?600:500, background:a?C.primary:"transparent", color:a?"white":"#666", transition:"all 0.15s" }),
   };
+
+  if (!device) return <DeviceSelector onSelect={setDevice} />;
 
   if (loading) return (
     <div style={{...S.app, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16}}>
@@ -250,11 +315,14 @@ export default function App() {
     </div>
   );
 
+  const currentDevice = DEVICES.find(d => d.key === device);
+  const DeviceIcon = currentDevice?.Icon;
+
   return (
     <div style={S.app}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
-      {/* Modals */}
+      {/* ── Modals ── */}
       {deleteTxConfirm && (
         <div style={S.overlay}><div style={S.modal}>
           <AlertTriangle size={40} style={{color:"#CC3333", marginBottom:16}}/>
@@ -289,14 +357,14 @@ export default function App() {
         </div></div>
       )}
 
-      {/* HEADER */}
+      {/* ── HEADER ── */}
       <header style={S.header}>
         <div style={S.logo}>
-          <span style={{fontSize:28}}>🏆</span>
+          <span style={{fontSize:isMobile?22:28}}>🏆</span>
           <div>
             <span style={{color:C.accent}}>ÉVOLUTION</span>
-            <span style={{color:"white", marginLeft:6}}>DE MORTEAU</span>
-            <div style={{fontSize:11, fontWeight:400, color:"rgba(255,255,255,0.6)", letterSpacing:"0.1em"}}>CAISSE ENREGISTREUSE</div>
+            <span style={{color:"white", marginLeft:isMobile?4:6}}>{isMobile?"MORTEAU":"DE MORTEAU"}</span>
+            {!isMobile && <div style={{fontSize:11, fontWeight:400, color:"rgba(255,255,255,0.6)", letterSpacing:"0.1em"}}>CAISSE ENREGISTREUSE</div>}
           </div>
         </div>
         <nav style={S.nav}>
@@ -306,7 +374,7 @@ export default function App() {
             {key:"parametres", label:"Paramètres", icon:<Settings size={16}/>},
           ].map(t => (
             <button key={t.key} style={S.navBtn(tab===t.key)} onClick={() => setTab(t.key)}>
-              {t.icon}{t.label}
+              {t.icon}{!isMobile && t.label}
             </button>
           ))}
         </nav>
@@ -316,160 +384,208 @@ export default function App() {
 
         {/* ══════════════════════════ CAISSE */}
         {tab === "caisse" && (
-          <div style={S.caisseGrid}>
-            <div style={S.card}>
-              <div style={S.cardHeader}>
-                <span style={S.cardTitle}>Articles</span>
-                <span style={{fontSize:13, color:"#888"}}>{filtered.length} articles</span>
-              </div>
-              <div style={S.catTabs}>
-                {catTabs.map(c => <button key={c} style={S.catTab(selectedCat===c)} onClick={() => setSelectedCat(c)}>{c}</button>)}
-              </div>
-              <div style={S.productGrid}>
-                {filtered.map(p => (
-                  <button key={p.id} style={S.productBtn} onClick={() => addToCart(p)}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor=C.primary; e.currentTarget.style.background=C.primaryLight; e.currentTarget.style.transform="translateY(-2px)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background="white"; e.currentTarget.style.transform="none"; }}
+          <>
+            {/* Onglets mobile Produits / Panier */}
+            {isMobile && (
+              <div style={{display:"flex", gap:0, marginBottom:16, background:"white", borderRadius:12, padding:4, border:"1px solid #E8EAF0", boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
+                {[
+                  {key:"produits", label:"Produits", icon:<ShoppingCart size={15}/>},
+                  {key:"panier",   label:`Panier${cart.length>0?" ("+cart.length+")":""}`, icon:<Tag size={15}/>},
+                ].map(t => (
+                  <button key={t.key}
+                    style={{flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:6, padding:"13px", borderRadius:9, border:"none", cursor:"pointer", fontSize:14, fontWeight:mobileTab===t.key?700:500, background:mobileTab===t.key?C.primary:"transparent", color:mobileTab===t.key?"white":"#666", transition:"all 0.15s"}}
+                    onClick={() => setMobileTab(t.key)}
                   >
-                    <span style={{fontSize:32, lineHeight:1}}>{p.emoji}</span>
-                    <span style={{fontSize:13, fontWeight:600, color:"#2a2a3e", lineHeight:1.3}}>{p.name}</span>
-                    <span style={{fontSize:14, fontWeight:700, color:C.primary}}>{formatPrice(p.price)}</span>
+                    {t.icon} {t.label}
                   </button>
                 ))}
               </div>
-            </div>
+            )}
 
-            <div style={{display:"flex", flexDirection:"column", gap:16}}>
-              <div style={S.card}>
-                <div style={S.cardHeader}>
-                  <span style={S.cardTitle}>Ticket en cours</span>
-                  {cart.length > 0 && (
-                    <button style={{border:"none", fontSize:12, padding:"4px 10px", borderRadius:8, cursor:"pointer", display:"flex", alignItems:"center", gap:4, background:"#FFF0F0", color:"#CC3333"}} onClick={clearCart}>
-                      <Trash2 size={13}/> Vider
-                    </button>
-                  )}
-                </div>
-                {cart.length === 0 ? (
-                  <div style={{padding:"32px 16px", textAlign:"center", color:"#AAB"}}>
-                    <ShoppingCart size={36} style={{margin:"0 auto 12px", opacity:0.3, display:"block"}}/>
-                    <p style={{margin:0, fontSize:14}}>Panier vide — cliquez sur un article</p>
+            <div style={S.caisseGrid}>
+
+              {/* ── PANNEAU PRODUITS ── */}
+              {(!isMobile || mobileTab === "produits") && (
+                <div style={S.card}>
+                  <div style={S.cardHeader}>
+                    <span style={S.cardTitle}>Articles</span>
+                    <span style={{fontSize:13, color:"#888"}}>{filtered.length} articles</span>
                   </div>
-                ) : (
-                  <div style={S.cartItems}>
-                    {cart.map(item => (
-                      <div key={item.id} style={S.cartItem}>
-                        <span style={{fontSize:18}}>{item.emoji}</span>
-                        <span style={{flex:1, fontSize:14, fontWeight:500}}>{item.name}</span>
-                        <button style={S.qtyBtn} onClick={() => updateQty(item.id,-1)}><Minus size={12}/></button>
-                        <span style={{fontSize:15, fontWeight:700, minWidth:20, textAlign:"center"}}>{item.qty}</span>
-                        <button style={S.qtyBtn} onClick={() => updateQty(item.id,1)}><Plus size={12}/></button>
-                        <span style={{fontSize:14, fontWeight:600, color:C.primary, minWidth:60, textAlign:"right"}}>{formatPrice(item.price*item.qty)}</span>
-                        <button style={{...S.iconBtn("#CC3333"), border:"none"}} onClick={() => setCart(prev=>prev.filter(i=>i.id!==item.id))}><X size={13}/></button>
-                      </div>
+                  <div style={S.catTabs}>
+                    {catTabs.map(c => <button key={c} style={S.catTab(selectedCat===c)} onClick={() => setSelectedCat(c)}>{c}</button>)}
+                  </div>
+                  <div style={S.productGrid}>
+                    {filtered.map(p => (
+                      <button key={p.id} style={S.productBtn} onClick={() => addToCart(p)}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor=C.primary; e.currentTarget.style.background=C.primaryLight; e.currentTarget.style.transform="translateY(-2px)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background="white"; e.currentTarget.style.transform="none"; }}
+                      >
+                        <span style={{fontSize:isMobile?28:32, lineHeight:1}}>{p.emoji}</span>
+                        <span style={{fontSize:isMobile?12:13, fontWeight:600, color:"#2a2a3e", lineHeight:1.3}}>{p.name}</span>
+                        <span style={{fontSize:isMobile?13:14, fontWeight:700, color:C.primary}}>{formatPrice(p.price)}</span>
+                      </button>
                     ))}
                   </div>
-                )}
-                <div style={S.totalSection}>
-                  <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-                    <span style={{fontSize:15, fontWeight:600, color:C.primaryDark}}>TOTAL À RÉGLER</span>
-                    <span style={{fontSize:22, fontWeight:800, color:C.primaryDark}}>{formatPrice(cartTotal)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div style={S.card}>
-                {encaisseStep === "saisie" ? (
-                  <>
-                    <div style={S.cardHeader}>
-                      <span style={S.cardTitle}>Encaissement — Étape 1/2</span>
-                      <span style={{fontSize:12, color:"#AAB", background:"#F0F2F8", padding:"3px 10px", borderRadius:20}}>Saisie du règlement</span>
+                  {/* Barre panier sticky (mobile) */}
+                  {isMobile && cart.length > 0 && (
+                    <div
+                      style={{padding:"14px 16px", background:C.primary, display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer"}}
+                      onClick={() => setMobileTab("panier")}
+                    >
+                      <span style={{color:"white", fontWeight:600, fontSize:14}}>
+                        {cart.reduce((s,i)=>s+i.qty,0)} article{cart.reduce((s,i)=>s+i.qty,0)>1?"s":""}
+                      </span>
+                      <div style={{display:"flex", alignItems:"center", gap:10}}>
+                        <span style={{color:"white", fontWeight:800, fontSize:18}}>{formatPrice(cartTotal)}</span>
+                        <ArrowRight size={18} color="white"/>
+                      </div>
                     </div>
-                    <div style={S.monnaieSection}>
-                      <div style={{fontSize:13, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:"0.05em"}}>Somme reçue</div>
-                      <div style={S.quickGrid}>
-                        {QUICK_AMOUNTS.map(a => (
-                          <button key={a} style={S.quickBtn}
-                            onClick={() => setAmountGiven(prev => Math.round((prev+a)*100)/100)}
-                            onMouseEnter={e => { e.currentTarget.style.background=C.primary; e.currentTarget.style.color="white"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background="white"; e.currentTarget.style.color=C.primary; }}
-                          >
-                            {a<1 ? `${Math.round(a*100)} c` : `${a} €`}
+                  )}
+                </div>
+              )}
+
+              {/* ── PANNEAU PANIER + PAIEMENT ── */}
+              {(!isMobile || mobileTab === "panier") && (
+                <div style={{display:"flex", flexDirection:"column", gap:16}}>
+                  <div style={S.card}>
+                    <div style={S.cardHeader}>
+                      <span style={S.cardTitle}>Ticket en cours</span>
+                      {cart.length > 0 && (
+                        <button style={{border:"none", fontSize:12, padding:"4px 10px", borderRadius:8, cursor:"pointer", display:"flex", alignItems:"center", gap:4, background:"#FFF0F0", color:"#CC3333"}} onClick={clearCart}>
+                          <Trash2 size={13}/> Vider
+                        </button>
+                      )}
+                    </div>
+                    {cart.length === 0 ? (
+                      <div style={{padding:"32px 16px", textAlign:"center", color:"#AAB"}}>
+                        <ShoppingCart size={36} style={{margin:"0 auto 12px", opacity:0.3, display:"block"}}/>
+                        <p style={{margin:0, fontSize:14}}>Panier vide — {isMobile?"touchez":"cliquez"} sur un article</p>
+                        {isMobile && (
+                          <button style={{marginTop:16, padding:"12px 24px", background:C.primary, color:"white", border:"none", borderRadius:10, fontSize:14, fontWeight:600, cursor:"pointer"}} onClick={() => setMobileTab("produits")}>
+                            ← Voir les produits
                           </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={S.cartItems}>
+                        {cart.map(item => (
+                          <div key={item.id} style={S.cartItem}>
+                            <span style={{fontSize:18}}>{item.emoji}</span>
+                            <span style={{flex:1, fontSize:isMobile?15:14, fontWeight:500}}>{item.name}</span>
+                            <button style={S.qtyBtn} onClick={() => updateQty(item.id,-1)}><Minus size={isMobile?14:12}/></button>
+                            <span style={{fontSize:15, fontWeight:700, minWidth:20, textAlign:"center"}}>{item.qty}</span>
+                            <button style={S.qtyBtn} onClick={() => updateQty(item.id,1)}><Plus size={isMobile?14:12}/></button>
+                            <span style={{fontSize:14, fontWeight:600, color:C.primary, minWidth:60, textAlign:"right"}}>{formatPrice(item.price*item.qty)}</span>
+                            <button style={{...S.iconBtn("#CC3333"), border:"none"}} onClick={() => setCart(prev=>prev.filter(i=>i.id!==item.id))}><X size={13}/></button>
+                          </div>
                         ))}
                       </div>
-                      <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
-                        <div style={{flex:1, background:"#F4F6FB", borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-                          <span style={{fontSize:13, color:"#666"}}>Reçu</span>
-                          <span style={{fontSize:20, fontWeight:800, color:"#333"}}>{formatPrice(amountGiven)}</span>
-                        </div>
-                        <button style={{border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600"}} onClick={() => setAmountGiven(0)}>✕ Effacer</button>
+                    )}
+                    <div style={S.totalSection}>
+                      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                        <span style={{fontSize:isMobile?16:15, fontWeight:600, color:C.primaryDark}}>TOTAL À RÉGLER</span>
+                        <span style={{fontSize:isMobile?24:22, fontWeight:800, color:C.primaryDark}}>{formatPrice(cartTotal)}</span>
                       </div>
-                      {amountGiven > 0 && (
-                        <div style={S.changeDisplay(change>=0)}>
-                          <span style={{fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828"}}>{change>=0?"Monnaie à rendre":"⚠️ Manque"}</span>
-                          <span style={{fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828"}}>{formatPrice(Math.abs(change))}</span>
-                        </div>
-                      )}
-                      <button style={{width:"100%", padding:"16px", background:canEncaisser?C.accent:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
-                        onClick={goToConfirmation}
-                        onMouseEnter={e => { if(canEncaisser) e.currentTarget.style.background=darken(C.accent,0.1); }}
-                        onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=C.accent; }}
-                      >
-                        <ArrowRight size={20}/> Valider le calcul
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div>
-                    <div style={{background:C.primary, borderRadius:"14px 14px 0 0", padding:"18px 20px 14px"}}>
-                      <div style={{fontSize:12, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4}}>Étape 2/2 — Remise de monnaie</div>
-                      <div style={{color:"white", fontSize:15, fontWeight:600}}>Total : {formatPrice(cartTotal)} · Reçu : {formatPrice(amountGiven)}</div>
-                    </div>
-                    <div style={{padding:"32px 20px 24px", textAlign:"center", background:change===0?"#F0FBF4":"#F0F8FF", borderBottom:"1px solid #E8EAF0"}}>
-                      {change === 0 ? (
-                        <><div style={{fontSize:48, marginBottom:8}}>✅</div><div style={{fontSize:16, color:"#2E7D32", fontWeight:600, marginBottom:4}}>Compte exact</div><div style={{fontSize:13, color:"#888"}}>Aucune monnaie à rendre</div></>
-                      ) : (
-                        <><div style={{fontSize:13, color:"#555", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:12}}>Monnaie à rendre</div>
-                        <div style={{fontSize:72, fontWeight:900, color:C.primaryDark, lineHeight:1, letterSpacing:"-2px", marginBottom:6}}>{formatPrice(change)}</div>
-                        <div style={{fontSize:14, color:"#888"}}>{formatPrice(amountGiven)} − {formatPrice(cartTotal)} = <strong style={{color:C.primary}}>{formatPrice(change)}</strong></div></>
-                      )}
-                    </div>
-                    <div style={{padding:"12px 20px", borderBottom:"1px solid #F0F2F8", maxHeight:130, overflowY:"auto"}}>
-                      {cart.map(item => (
-                        <div key={item.id} style={{display:"flex", justifyContent:"space-between", fontSize:13, padding:"4px 0", color:"#555"}}>
-                          <span>{item.emoji} {item.name} ×{item.qty}</span>
-                          <span style={{fontWeight:600, color:"#333"}}>{formatPrice(item.price*item.qty)}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{padding:"16px 20px", display:"flex", flexDirection:"column", gap:10}}>
-                      <button style={{width:"100%", padding:"18px", background:C.primary, color:"white", border:"none", borderRadius:12, fontSize:17, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
-                        onClick={confirmerRemise}
-                        onMouseEnter={e => { e.currentTarget.style.background=C.primaryDark; }}
-                        onMouseLeave={e => { e.currentTarget.style.background=C.primary; }}
-                      >
-                        <CheckCircle size={22}/> Monnaie remise — Terminer
-                      </button>
-                      <button style={{width:"100%", padding:"11px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:10, fontSize:14, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8}} onClick={annulerConfirmation}>
-                        <RotateCcw size={14}/> Corriger le montant reçu
-                      </button>
                     </div>
                   </div>
-                )}
-              </div>
+
+                  <div style={S.card}>
+                    {encaisseStep === "saisie" ? (
+                      <>
+                        <div style={S.cardHeader}>
+                          <span style={S.cardTitle}>Encaissement — Étape 1/2</span>
+                          <span style={{fontSize:12, color:"#AAB", background:"#F0F2F8", padding:"3px 10px", borderRadius:20}}>Saisie du règlement</span>
+                        </div>
+                        <div style={S.monnaieSection}>
+                          <div style={{fontSize:13, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:"0.05em"}}>Somme reçue</div>
+                          <div style={S.quickGrid}>
+                            {QUICK_AMOUNTS.map(a => (
+                              <button key={a} style={S.quickBtn}
+                                onClick={() => setAmountGiven(prev => Math.round((prev+a)*100)/100)}
+                                onMouseEnter={e => { e.currentTarget.style.background=C.primary; e.currentTarget.style.color="white"; }}
+                                onMouseLeave={e => { e.currentTarget.style.background="white"; e.currentTarget.style.color=C.primary; }}
+                              >
+                                {a<1 ? `${Math.round(a*100)} c` : `${a} €`}
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
+                            <div style={{flex:1, background:"#F4F6FB", borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                              <span style={{fontSize:13, color:"#666"}}>Reçu</span>
+                              <span style={{fontSize:20, fontWeight:800, color:"#333"}}>{formatPrice(amountGiven)}</span>
+                            </div>
+                            <button style={{border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600"}} onClick={() => setAmountGiven(0)}>✕ Effacer</button>
+                          </div>
+                          {amountGiven > 0 && (
+                            <div style={S.changeDisplay(change>=0)}>
+                              <span style={{fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828"}}>{change>=0?"Monnaie à rendre":"⚠️ Manque"}</span>
+                              <span style={{fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828"}}>{formatPrice(Math.abs(change))}</span>
+                            </div>
+                          )}
+                          <button
+                            style={{width:"100%", padding:isMobile?"18px":"16px", background:canEncaisser?C.accent:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:isMobile?18:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
+                            onClick={goToConfirmation}
+                            onMouseEnter={e => { if(canEncaisser) e.currentTarget.style.background=darken(C.accent,0.1); }}
+                            onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=C.accent; }}
+                          >
+                            <ArrowRight size={20}/> Valider le calcul
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <div style={{background:C.primary, borderRadius:"14px 14px 0 0", padding:"18px 20px 14px"}}>
+                          <div style={{fontSize:12, color:"rgba(255,255,255,0.65)", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4}}>Étape 2/2 — Remise de monnaie</div>
+                          <div style={{color:"white", fontSize:15, fontWeight:600}}>Total : {formatPrice(cartTotal)} · Reçu : {formatPrice(amountGiven)}</div>
+                        </div>
+                        <div style={{padding:"32px 20px 24px", textAlign:"center", background:change===0?"#F0FBF4":"#F0F8FF", borderBottom:"1px solid #E8EAF0"}}>
+                          {change === 0 ? (
+                            <><div style={{fontSize:isMobile?52:48, marginBottom:8}}>✅</div><div style={{fontSize:16, color:"#2E7D32", fontWeight:600, marginBottom:4}}>Compte exact</div><div style={{fontSize:13, color:"#888"}}>Aucune monnaie à rendre</div></>
+                          ) : (
+                            <><div style={{fontSize:13, color:"#555", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:12}}>Monnaie à rendre</div>
+                            <div style={{fontSize:isMobile?58:72, fontWeight:900, color:C.primaryDark, lineHeight:1, letterSpacing:"-2px", marginBottom:6}}>{formatPrice(change)}</div>
+                            <div style={{fontSize:14, color:"#888"}}>{formatPrice(amountGiven)} − {formatPrice(cartTotal)} = <strong style={{color:C.primary}}>{formatPrice(change)}</strong></div></>
+                          )}
+                        </div>
+                        <div style={{padding:"12px 20px", borderBottom:"1px solid #F0F2F8", maxHeight:130, overflowY:"auto"}}>
+                          {cart.map(item => (
+                            <div key={item.id} style={{display:"flex", justifyContent:"space-between", fontSize:13, padding:"4px 0", color:"#555"}}>
+                              <span>{item.emoji} {item.name} ×{item.qty}</span>
+                              <span style={{fontWeight:600, color:"#333"}}>{formatPrice(item.price*item.qty)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{padding:"16px 20px", display:"flex", flexDirection:"column", gap:10}}>
+                          <button
+                            style={{width:"100%", padding:isMobile?"20px":"18px", background:C.primary, color:"white", border:"none", borderRadius:12, fontSize:isMobile?18:17, fontWeight:800, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
+                            onClick={confirmerRemise}
+                            onMouseEnter={e => { e.currentTarget.style.background=C.primaryDark; }}
+                            onMouseLeave={e => { e.currentTarget.style.background=C.primary; }}
+                          >
+                            <CheckCircle size={22}/> Monnaie remise — Terminer
+                          </button>
+                          <button style={{width:"100%", padding:"11px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:10, fontSize:14, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8}} onClick={annulerConfirmation}>
+                            <RotateCcw size={14}/> Corriger le montant reçu
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          </>
         )}
 
         {/* ══════════════════════════ HISTORIQUE */}
         {tab === "historique" && (
           <div>
             <div style={S.statsBar}>
-              <div style={{textAlign:"center"}}>
+              <div style={{textAlign:"left"}}>
                 <div style={{fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>CA du jour</div>
-                <div style={{fontSize:32, fontWeight:800, color:C.accent}}>{formatPrice(totalJour)}</div>
+                <div style={{fontSize:isMobile?24:32, fontWeight:800, color:C.accent}}>{formatPrice(totalJour)}</div>
               </div>
-              <div style={{display:"flex", gap:32, alignItems:"center"}}>
+              <div style={{display:"flex", gap:isMobile?16:32, alignItems:"center", flexWrap:"wrap"}}>
                 <div style={{textAlign:"center"}}>
                   <div style={{fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>Transactions aujourd'hui</div>
                   <div style={{fontSize:22, fontWeight:800, color:C.accent}}>{txToday.length}</div>
@@ -495,19 +611,19 @@ export default function App() {
               transactions.map((tx, i) => (
                 <div key={tx.id} style={S.txCard}>
                   <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
-                    <div style={{fontSize:13, color:"#888", display:"flex", alignItems:"center", gap:5}}>
+                    <div style={{fontSize:isMobile?12:13, color:"#888", display:"flex", alignItems:"center", gap:5, flexWrap:"wrap"}}>
                       <Clock size={14}/> {formatDate(tx.created_at)} {formatTime(tx.created_at)}
                       <span style={{marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666"}}>#{transactions.length-i}</span>
                     </div>
                     <div style={{display:"flex", alignItems:"center", gap:12}}>
-                      <span style={{fontSize:18, fontWeight:800, color:C.primaryDark}}>{formatPrice(tx.total)}</span>
+                      <span style={{fontSize:isMobile?16:18, fontWeight:800, color:C.primaryDark}}>{formatPrice(tx.total)}</span>
                       <button style={{...S.iconBtn("#CC3333"), border:"none"}} onClick={() => setDeleteTxConfirm(tx.id)}><Trash2 size={14}/></button>
                     </div>
                   </div>
                   <div style={{fontSize:13, color:"#555", borderTop:"1px solid #F0F2F8", paddingTop:10, display:"flex", flexWrap:"wrap", gap:"4px 12px"}}>
                     {(tx.items||[]).map((item,j) => <span key={j}>{item.emoji} {item.name} ×{item.qty}</span>)}
                   </div>
-                  <div style={{marginTop:10, display:"flex", gap:16, fontSize:12, color:"#888"}}>
+                  <div style={{marginTop:10, display:"flex", gap:16, fontSize:12, color:"#888", flexWrap:"wrap"}}>
                     <span>Reçu : <strong style={{color:"#333"}}>{formatPrice(tx.given)}</strong></span>
                     <span>Monnaie rendue : <strong style={{color:"#333"}}>{formatPrice(tx.change)}</strong></span>
                   </div>
@@ -520,12 +636,29 @@ export default function App() {
         {/* ══════════════════════════ PARAMÈTRES */}
         {tab === "parametres" && (
           <div>
-            {/* Barre de sous-onglets */}
+            {/* Appareil actuel + bouton changer */}
+            <div style={{...S.card, marginBottom:20, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12}}>
+              <div style={{display:"flex", alignItems:"center", gap:12}}>
+                {DeviceIcon && <DeviceIcon size={22} style={{color:C.primary}}/>}
+                <div>
+                  <div style={{fontWeight:700, fontSize:15, color:C.primaryDark}}>{currentDevice?.label}</div>
+                  <div style={{fontSize:12, color:"#888", marginTop:2}}>{currentDevice?.sublabel} — appareil sélectionné</div>
+                </div>
+              </div>
+              <button
+                style={{display:"flex", alignItems:"center", gap:8, padding:"10px 18px", background:"white", color:C.primary, border:`1.5px solid ${C.primary}`, borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer"}}
+                onClick={() => setDevice(null)}
+              >
+                <RotateCcw size={14}/> Changer d'appareil
+              </button>
+            </div>
+
+            {/* Sous-onglets */}
             <div style={S.subTabBar}>
               {[
-                { key:"apparence",  label:"Apparence",   icon:<Palette size={15}/> },
-                { key:"categories", label:"Catégories",  icon:<Tag size={15}/> },
-                { key:"articles",   label:"Articles",    icon:<Package size={15}/> },
+                {key:"apparence",  label:"Apparence",  icon:<Palette size={15}/>},
+                {key:"categories", label:"Catégories", icon:<Tag size={15}/>},
+                {key:"articles",   label:"Articles",   icon:<Package size={15}/>},
               ].map(t => (
                 <button key={t.key} style={S.subTab(settingsTab===t.key)} onClick={() => setSettingsTab(t.key)}>
                   {t.icon}{t.label}
@@ -533,7 +666,7 @@ export default function App() {
               ))}
             </div>
 
-            {/* ── Sous-onglet Apparence ── */}
+            {/* ── Apparence ── */}
             {settingsTab === "apparence" && (
               <div>
                 <div style={{marginBottom:16}}>
@@ -541,7 +674,7 @@ export default function App() {
                   <p style={{margin:"4px 0 0", color:"#888", fontSize:14}}>Personnalise les couleurs de l'application</p>
                 </div>
                 <div style={S.card}>
-                  <div style={{padding:"20px", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:20}}>
+                  <div style={{padding:"20px", display:"grid", gridTemplateColumns:isMobile?"1fr":isTablet?"1fr 1fr":"1fr 1fr 1fr", gap:20}}>
                     {[
                       {label:"Couleur principale", key:"primary",    hint:"Header, boutons, onglets"},
                       {label:"Couleur accent",     key:"accent",     hint:"Bouton valider, stats CA"},
@@ -588,7 +721,7 @@ export default function App() {
               </div>
             )}
 
-            {/* ── Sous-onglet Catégories ── */}
+            {/* ── Catégories ── */}
             {settingsTab === "categories" && (
               <div>
                 <div style={{marginBottom:16}}>
@@ -629,7 +762,7 @@ export default function App() {
               </div>
             )}
 
-            {/* ── Sous-onglet Articles ── */}
+            {/* ── Articles ── */}
             {settingsTab === "articles" && (
               <div>
                 <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16}}>
@@ -646,7 +779,7 @@ export default function App() {
                 {showAddForm && (
                   <div style={{...S.card, marginBottom:20}}>
                     <div style={S.cardHeader}><span style={S.cardTitle}>Nouvel article</span></div>
-                    <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, padding:"16px 20px"}}>
+                    <div style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"1fr 1fr", gap:12, padding:"16px 20px"}}>
                       {[
                         {label:"Emoji", key:"emoji", placeholder:"🛒", type:"text"},
                         {label:"Nom *", key:"name",  placeholder:"Ex: Hot-dog", type:"text"},
@@ -680,7 +813,7 @@ export default function App() {
                   {products.map(p => (
                     editingProduct?.id === p.id ? (
                       <div key={p.id} style={{padding:"12px 20px", borderBottom:"1px solid #F0F2F8", background:"#F8FAFF"}}>
-                        <div style={{display:"grid", gridTemplateColumns:"80px 1fr 120px 150px", gap:10, alignItems:"center"}}>
+                        <div style={{display:"grid", gridTemplateColumns:isMobile?"1fr 1fr":"80px 1fr 120px 150px", gap:10, alignItems:"center"}}>
                           <input style={{...S.input, textAlign:"center", fontSize:20}} value={editingProduct.emoji} onChange={e => setEditingProduct(p=>({...p,emoji:e.target.value}))}/>
                           <input style={S.input} value={editingProduct.name} onChange={e => setEditingProduct(p=>({...p,name:e.target.value}))}/>
                           <input style={S.input} type="number" step="0.10" value={editingProduct.price} onChange={e => setEditingProduct(p=>({...p,price:e.target.value}))}/>
