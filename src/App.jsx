@@ -144,7 +144,7 @@ export default function App() {
     setProducts(data);
   }
   async function loadTransactions() {
-    const { data, error } = await supabase.from("transactions").select("*").order("created_at",{ascending:false}).limit(200);
+    const { data, error } = await supabase.from("transactions").select("*").order("created_at",{ascending:false}).limit(1000);
     if (error) { setDbError(true); return; }
     setTransactions(data);
   }
