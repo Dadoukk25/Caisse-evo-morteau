@@ -83,8 +83,59 @@ function DeviceSelector({ onSelect }) {
   );
 }
 
+function ModeSelector({ onSelect }) {
+  const [hovered, setHovered] = useState(null);
+  const MODES = [
+    { key:"rendu",     label:"Je rends la monnaie",      sublabel:"Calculette avec rendu de monnaie",     icon:"💶" },
+    { key:"sans_rendu", label:"Je ne rends pas la monnaie", sublabel:"Encaissement direct, sans calcul", icon:"⚡" },
+  ];
+  return (
+    <div style={{
+      minHeight:"100vh", background:DEFAULTS.background,
+      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+      fontFamily:"'Segoe UI',system-ui,sans-serif", padding:"24px"
+    }}>
+      <div style={{ textAlign:"center", marginBottom:48 }}>
+        <div style={{ fontSize:56, marginBottom:16 }}>🏆</div>
+        <h1 style={{ margin:0, fontSize:28, fontWeight:800, color:DEFAULTS.primary }}>
+          <span style={{ color:DEFAULTS.accent }}>ÉVOLUTION</span> DE MORTEAU
+        </h1>
+        <p style={{ margin:"10px 0 0", color:"#888", fontSize:15 }}>
+          Rendez-vous la monnaie sur ce point de vente ?
+        </p>
+      </div>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:16, justifyContent:"center", maxWidth:700 }}>
+        {MODES.map(({ key, label, sublabel, icon }) => (
+          <button
+            key={key}
+            onClick={() => onSelect(key)}
+            onMouseEnter={() => setHovered(key)}
+            onMouseLeave={() => setHovered(null)}
+            style={{
+              display:"flex", flexDirection:"column", alignItems:"center", gap:14,
+              padding:"32px 40px", borderRadius:20,
+              border:`2px solid ${hovered===key ? DEFAULTS.primary : "#E0E4F0"}`,
+              background: hovered===key ? DEFAULTS.primary : "white",
+              color: hovered===key ? "white" : "#1a1a2e",
+              cursor:"pointer", transition:"all 0.18s", minWidth:220,
+              boxShadow: hovered===key ? "0 8px 28px rgba(0,59,142,0.25)" : "0 2px 8px rgba(0,0,0,0.06)"
+            }}
+          >
+            <span style={{ fontSize:40 }}>{icon}</span>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontWeight:700, fontSize:16 }}>{label}</div>
+              <div style={{ fontSize:12, opacity:0.72, marginTop:4 }}>{sublabel}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [device, setDevice]              = useState(null);
+  const [changeMode, setChangeMode]      = useState(null); // "rendu" | "sans_rendu"
   const [mobileTab, setMobileTab]        = useState("produits");
   const [tab, setTab]                    = useState("caisse");
   const [settingsTab, setSettingsTab]    = useState("apparence");
@@ -107,6 +158,9 @@ export default function App() {
 
   const [deleteTxConfirm, setDeleteTxConfirm]         = useState(null);
   const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
+  const [historyView, setHistoryView]                 = useState("liste"); // "liste" | "articles"
+  const [selectedArticle, setSelectedArticle]          = useState(null); // nom de l'article sélectionné
+  const [articleDateFilter, setArticleDateFilter]      = useState("tout"); // "tout" | "YYYY-MM-DD"
 
   const [newCatName, setNewCatName]              = useState("");
   const [deleteCatConfirm, setDeleteCatConfirm]  = useState(null);
@@ -181,6 +235,7 @@ export default function App() {
   const cartTotal    = cart.reduce((s,i) => s + i.price * i.qty, 0);
   const change       = amountGiven - cartTotal;
   const canEncaisser = cart.length > 0 && amountGiven >= cartTotal;
+  const quickAmounts = changeMode === "rendu" ? QUICK_AMOUNTS.filter(a => a >= 1) : QUICK_AMOUNTS;
 
   useEffect(() => {
     if (catNames.length > 0 && !newProduct.category)
@@ -200,6 +255,14 @@ export default function App() {
 
   async function confirmerRemise() {
     const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change };
+    const { error } = await supabase.from("transactions").insert([tx]);
+    if (error) { alert("Erreur lors de l'enregistrement : " + error.message); return; }
+    clearCart();
+    await loadTransactions();
+  }
+  async function encaisserDirect() {
+    if (cart.length === 0) return;
+    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0 };
     const { error } = await supabase.from("transactions").insert([tx]);
     if (error) { alert("Erreur lors de l'enregistrement : " + error.message); return; }
     clearCart();
@@ -259,6 +322,34 @@ export default function App() {
   const txToday   = transactions.filter(t => new Date(t.created_at).toDateString() === today);
   const totalJour = txToday.reduce((s,t) => s+Number(t.total), 0);
 
+  // Liste des jours distincts présents dans l'historique (pour le filtre)
+  const availableDates = Array.from(new Set(transactions.map(t => {
+    const d = new Date(t.created_at);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }))).sort().reverse();
+
+  // Stats agrégées par article (nom), sur les transactions filtrées par date
+  const txForArticleStats = articleDateFilter === "tout"
+    ? transactions
+    : transactions.filter(t => {
+        const d = new Date(t.created_at);
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        return key === articleDateFilter;
+      });
+
+  const articleStatsMap = {};
+  txForArticleStats.forEach(t => {
+    (t.items||[]).forEach(item => {
+      if (!articleStatsMap[item.name]) {
+        articleStatsMap[item.name] = { name:item.name, emoji:item.emoji, qty:0, total:0 };
+      }
+      articleStatsMap[item.name].qty   += item.qty;
+      articleStatsMap[item.name].total += item.price * item.qty;
+    });
+  });
+  const articleStatsList = Object.values(articleStatsMap).sort((a,b) => b.total - a.total);
+  const selectedArticleStats = selectedArticle ? articleStatsMap[selectedArticle] : null;
+
   const qtySize = isMobile ? 42 : isTablet ? 34 : 28;
 
   const S = {
@@ -299,6 +390,7 @@ export default function App() {
   };
 
   if (!device) return <DeviceSelector onSelect={setDevice} />;
+  if (!changeMode) return <ModeSelector onSelect={setChangeMode} />;
 
   if (loading) return (
     <div style={{...S.app, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16}}>
@@ -490,7 +582,25 @@ export default function App() {
                   </div>
 
                   <div style={S.card}>
-                    {encaisseStep === "saisie" ? (
+                    {changeMode === "sans_rendu" ? (
+                      /* ── Mode sans rendu de monnaie : encaissement direct ── */
+                      <>
+                        <div style={S.cardHeader}>
+                          <span style={S.cardTitle}>Encaissement</span>
+                          <span style={{fontSize:12, color:"#AAB", background:"#F0F2F8", padding:"3px 10px", borderRadius:20}}>Sans rendu de monnaie</span>
+                        </div>
+                        <div style={{padding:isMobile?"16px":"20px"}}>
+                          <button
+                            style={{width:"100%", padding:isMobile?"20px":"18px", background:cart.length>0?C.accent:"#C8D0E8", color:cart.length>0?"#1a1000":"white", border:"none", borderRadius:12, fontSize:isMobile?18:17, fontWeight:800, cursor:cart.length>0?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
+                            onClick={encaisserDirect}
+                            onMouseEnter={e => { if(cart.length>0) e.currentTarget.style.background=darken(C.accent,0.1); }}
+                            onMouseLeave={e => { if(cart.length>0) e.currentTarget.style.background=cart.length>0?C.accent:"#C8D0E8"; }}
+                          >
+                            <CheckCircle size={20}/> Encaisser {formatPrice(cartTotal)}
+                          </button>
+                        </div>
+                      </>
+                    ) : encaisseStep === "saisie" ? (
                       <>
                         <div style={S.cardHeader}>
                           <span style={S.cardTitle}>Encaissement — Étape 1/2</span>
@@ -499,7 +609,7 @@ export default function App() {
                         <div style={S.monnaieSection}>
                           <div style={{fontSize:13, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:"0.05em"}}>Somme reçue</div>
                           <div style={S.quickGrid}>
-                            {QUICK_AMOUNTS.map(a => (
+                            {quickAmounts.map(a => (
                               <button key={a} style={S.quickBtn}
                                 onClick={() => setAmountGiven(prev => Math.round((prev+a)*100)/100)}
                                 onMouseEnter={e => { e.currentTarget.style.background=C.primary; e.currentTarget.style.color="white"; }}
@@ -602,6 +712,20 @@ export default function App() {
                 )}
               </div>
             </div>
+            {/* Sous-onglets Historique : Liste / Par article */}
+            <div style={S.subTabBar}>
+              {[
+                {key:"liste",    label:"Liste des transactions", icon:<Clock size={15}/>},
+                {key:"articles", label:"Par article",            icon:<Tag size={15}/>},
+              ].map(t => (
+                <button key={t.key} style={S.subTab(historyView===t.key)} onClick={() => { setHistoryView(t.key); setSelectedArticle(null); }}>
+                  {t.icon}{t.label}
+                </button>
+              ))}
+            </div>
+
+            {historyView === "liste" && (
+            <>
             {transactions.length === 0 ? (
               <div style={{textAlign:"center", padding:"60px 20px", color:"#AAB"}}>
                 <Clock size={48} style={{margin:"0 auto 16px", opacity:0.3, display:"block"}}/>
@@ -630,6 +754,83 @@ export default function App() {
                 </div>
               ))
             )}
+            </>
+            )}
+
+            {historyView === "articles" && (
+              <div>
+                {/* Filtre par date */}
+                <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:16, flexWrap:"wrap"}}>
+                  <span style={{fontSize:13, color:"#666", fontWeight:600}}>Filtrer par jour :</span>
+                  <select
+                    style={{...S.select, width:"auto", minWidth:160}}
+                    value={articleDateFilter}
+                    onChange={e => { setArticleDateFilter(e.target.value); setSelectedArticle(null); }}
+                  >
+                    <option value="tout">Toute la période</option>
+                    {availableDates.map(d => (
+                      <option key={d} value={d}>{new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"})}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedArticle && selectedArticleStats ? (
+                  /* ── Détail d'un article sélectionné ── */
+                  <div>
+                    <button
+                      style={{display:"flex", alignItems:"center", gap:6, marginBottom:16, padding:"8px 14px", background:"white", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:13, color:"#666", cursor:"pointer"}}
+                      onClick={() => setSelectedArticle(null)}
+                    >
+                      ← Retour à la liste des articles
+                    </button>
+                    <div style={S.statsBar}>
+                      <div style={{display:"flex", alignItems:"center", gap:14}}>
+                        <span style={{fontSize:40}}>{selectedArticleStats.emoji}</span>
+                        <div>
+                          <div style={{fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4}}>Article</div>
+                          <div style={{fontSize:isMobile?20:26, fontWeight:800}}>{selectedArticleStats.name}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex", gap:isMobile?16:32, alignItems:"center", flexWrap:"wrap"}}>
+                        <div style={{textAlign:"center"}}>
+                          <div style={{fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>Quantité vendue</div>
+                          <div style={{fontSize:isMobile?22:28, fontWeight:800, color:C.accent}}>{selectedArticleStats.qty}</div>
+                        </div>
+                        <div style={{textAlign:"center"}}>
+                          <div style={{fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>Chiffre d'affaires</div>
+                          <div style={{fontSize:isMobile?22:28, fontWeight:800, color:C.accent}}>{formatPrice(selectedArticleStats.total)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Liste cliquable des articles ── */
+                  articleStatsList.length === 0 ? (
+                    <div style={{textAlign:"center", padding:"60px 20px", color:"#AAB"}}>
+                      <Tag size={48} style={{margin:"0 auto 16px", opacity:0.3, display:"block"}}/>
+                      <p style={{fontSize:16}}>Aucune vente sur cette période</p>
+                    </div>
+                  ) : (
+                    <div style={S.card}>
+                      {articleStatsList.map(stat => (
+                        <button
+                          key={stat.name}
+                          style={{...S.settingsRow, width:"100%", background:"transparent", border:"none", borderBottom:"1px solid #F0F2F8", cursor:"pointer", textAlign:"left"}}
+                          onClick={() => setSelectedArticle(stat.name)}
+                          onMouseEnter={e => e.currentTarget.style.background="#F8FAFF"}
+                          onMouseLeave={e => e.currentTarget.style.background="transparent"}
+                        >
+                          <span style={{fontSize:24, width:36, textAlign:"center"}}>{stat.emoji}</span>
+                          <span style={{flex:1, fontWeight:600, fontSize:14}}>{stat.name}</span>
+                          <span style={{fontSize:13, color:"#888"}}>{stat.qty} vendu(s)</span>
+                          <span style={{fontWeight:700, color:C.primary, fontSize:14, minWidth:80, textAlign:"right"}}>{formatPrice(stat.total)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -650,6 +851,23 @@ export default function App() {
                 onClick={() => setDevice(null)}
               >
                 <RotateCcw size={14}/> Changer d'appareil
+              </button>
+            </div>
+
+            {/* Mode encaissement actuel + bouton changer */}
+            <div style={{...S.card, marginBottom:20, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12}}>
+              <div style={{display:"flex", alignItems:"center", gap:12}}>
+                <span style={{fontSize:22}}>{changeMode === "rendu" ? "💶" : "⚡"}</span>
+                <div>
+                  <div style={{fontWeight:700, fontSize:15, color:C.primaryDark}}>{changeMode === "rendu" ? "Je rends la monnaie" : "Je ne rends pas la monnaie"}</div>
+                  <div style={{fontSize:12, color:"#888", marginTop:2}}>Mode d'encaissement actif</div>
+                </div>
+              </div>
+              <button
+                style={{display:"flex", alignItems:"center", gap:8, padding:"10px 18px", background:"white", color:C.primary, border:`1.5px solid ${C.primary}`, borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer"}}
+                onClick={() => setChangeMode(null)}
+              >
+                <RotateCcw size={14}/> Changer de mode
               </button>
             </div>
 
