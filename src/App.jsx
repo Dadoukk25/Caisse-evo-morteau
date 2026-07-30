@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 import {
   ShoppingCart, Clock, Settings, Plus, Minus, Trash2,
   CheckCircle, Edit3, X, Save, ArrowRight, RotateCcw,
-  Loader2, WifiOff, AlertTriangle, Tag, Palette, Package,
+  Loader2, WifiOff, Wifi, AlertTriangle, Tag, Palette, Package,
   Monitor, Tablet, Smartphone
 } from "lucide-react";
 
@@ -133,6 +133,49 @@ function ModeSelector({ onSelect }) {
   );
 }
 
+function TabletNameSetup({ onSubmit }) {
+  const [name, setName] = useState("");
+  const trimmed = name.trim();
+  return (
+    <div style={{
+      minHeight:"100vh", background:DEFAULTS.background,
+      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+      fontFamily:"'Segoe UI',system-ui,sans-serif", padding:"24px"
+    }}>
+      <div style={{ textAlign:"center", marginBottom:32 }}>
+        <div style={{ fontSize:56, marginBottom:16 }}>🏷️</div>
+        <h1 style={{ margin:0, fontSize:28, fontWeight:800, color:DEFAULTS.primary }}>
+          <span style={{ color:DEFAULTS.accent }}>ÉVOLUTION</span> DE MORTEAU
+        </h1>
+        <p style={{ margin:"10px 0 0", color:"#888", fontSize:15 }}>
+          Donnez un nom à cette tablette (ex : "Caisse entrée", "Bar")
+        </p>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:14, width:"100%", maxWidth:360 }}>
+        <input
+          autoFocus
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && trimmed) onSubmit(trimmed); }}
+          placeholder="Nom de la tablette"
+          style={{ padding:"16px 18px", borderRadius:14, border:"1.5px solid #E0E4F0", fontSize:16, outline:"none", boxSizing:"border-box" }}
+        />
+        <button
+          disabled={!trimmed}
+          onClick={() => onSubmit(trimmed)}
+          style={{
+            padding:"16px", background:trimmed?DEFAULTS.primary:"#C8D0E8", color:"white", border:"none",
+            borderRadius:14, fontSize:16, fontWeight:700, cursor:trimmed?"pointer":"default",
+            display:"flex", alignItems:"center", justifyContent:"center", gap:10
+          }}
+        >
+          Continuer <ArrowRight size={18}/>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [device, setDevice]              = useState(null);
   const [changeMode, setChangeMode]      = useState(null); // "rendu" | "sans_rendu"
@@ -169,6 +212,18 @@ export default function App() {
   const [colors, setColors]           = useState({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background });
   const [savingColors, setSavingColors] = useState(false);
 
+  const [tabletName, setTabletName]           = useState(() => localStorage.getItem("tablet_name") || "");
+  const [tabletNameDraft, setTabletNameDraft] = useState(() => localStorage.getItem("tablet_name") || "");
+  const [renamingTablet, setRenamingTablet]   = useState(false);
+  const [tablets, setTablets]                 = useState([]);
+
+  const [isOnline, setIsOnline]                   = useState(navigator.onLine);
+  const [supabaseReachable, setSupabaseReachable] = useState(true);
+  const [pendingTransactions, setPendingTransactions] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("pending_transactions") || "[]"); }
+    catch { return []; }
+  });
+
   const isMobile = device === "iphone" || device === "android-phone";
   const isTablet = device === "ipad" || device === "android-tablet";
 
@@ -191,6 +246,26 @@ export default function App() {
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, []);
+
+  useEffect(() => {
+    function handleOnline() { setIsOnline(true); syncPendingTransactions(); }
+    function handleOffline() { setIsOnline(false); }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    if (navigator.onLine) syncPendingTransactions();
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [tabletName, device]);
+
+  useEffect(() => {
+    if (tabletName && device) pingTablet(tabletName, pendingTransactions.length);
+  }, [tabletName, device]);
+
+  useEffect(() => {
+    if (settingsTab === "tablettes") loadTablets();
+  }, [settingsTab]);
 
   async function loadProducts() {
     const { data, error } = await supabase.from("products").select("*").order("category").order("name");
@@ -229,6 +304,88 @@ export default function App() {
   }
   function resetColors() { setColors({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background }); }
 
+  async function pingTablet(name, pendingCount) {
+    if (!name) return;
+    try {
+      const { error } = await supabase.from("tablets").upsert({
+        name, device_type:device, last_sync:new Date().toISOString(), pending_count:pendingCount,
+      }, { onConflict:"name" });
+      if (error) throw error;
+    } catch { /* ping non-bloquant */ }
+  }
+
+  async function loadTablets() {
+    const { data, error } = await supabase.from("tablets").select("*").order("name");
+    if (error) return;
+    setTablets(data || []);
+  }
+
+  function handleTabletNameSubmit(name) {
+    localStorage.setItem("tablet_name", name);
+    setTabletName(name);
+    setTabletNameDraft(name);
+  }
+
+  async function renameTablet(newName) {
+    const trimmed = newName.trim();
+    if (!trimmed || renamingTablet) return;
+    setRenamingTablet(true);
+    const oldName = tabletName;
+    localStorage.setItem("tablet_name", trimmed);
+    setTabletName(trimmed);
+    try {
+      if (oldName && oldName !== trimmed) {
+        const { data } = await supabase.from("tablets")
+          .update({ name:trimmed, device_type:device, last_sync:new Date().toISOString() })
+          .eq("name", oldName).select();
+        if (!data || data.length === 0) await pingTablet(trimmed, pendingTransactions.length);
+      } else {
+        await pingTablet(trimmed, pendingTransactions.length);
+      }
+      await loadTablets();
+    } finally {
+      setRenamingTablet(false);
+    }
+  }
+
+  function queuePendingTransaction(tx) {
+    setPendingTransactions(prev => {
+      const updated = [...prev, { id:Date.now()+"-"+Math.random().toString(36).slice(2), tx, queued_at:new Date().toISOString() }];
+      localStorage.setItem("pending_transactions", JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  async function submitTransaction(tx) {
+    try {
+      const { error } = await supabase.from("transactions").insert([tx]);
+      if (error) throw error;
+      setSupabaseReachable(true);
+      await loadTransactions();
+      await pingTablet(tabletName, pendingTransactions.length);
+    } catch {
+      setSupabaseReachable(false);
+      queuePendingTransaction(tx);
+    }
+  }
+
+  async function syncPendingTransactions() {
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem("pending_transactions") || "[]"); } catch { stored = []; }
+    if (stored.length === 0) return;
+    try {
+      const { error } = await supabase.from("transactions").insert(stored.map(p => p.tx));
+      if (error) throw error;
+      localStorage.removeItem("pending_transactions");
+      setPendingTransactions([]);
+      setSupabaseReachable(true);
+      await loadTransactions();
+      await pingTablet(tabletName, 0);
+    } catch {
+      setSupabaseReachable(false);
+    }
+  }
+
   const catNames     = categories.map(c => c.name);
   const catTabs      = ["Tous", ...catNames];
   const filtered     = selectedCat === "Tous" ? products : products.filter(p => p.category === selectedCat);
@@ -255,18 +412,14 @@ export default function App() {
 
   async function confirmerRemise() {
     const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change };
-    const { error } = await supabase.from("transactions").insert([tx]);
-    if (error) { alert("Erreur lors de l'enregistrement : " + error.message); return; }
+    await submitTransaction(tx);
     clearCart();
-    await loadTransactions();
   }
   async function encaisserDirect() {
     if (cart.length === 0) return;
     const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0 };
-    const { error } = await supabase.from("transactions").insert([tx]);
-    if (error) { alert("Erreur lors de l'enregistrement : " + error.message); return; }
+    await submitTransaction(tx);
     clearCart();
-    await loadTransactions();
   }
   async function deleteTransaction(id) {
     const { error } = await supabase.from("transactions").delete().eq("id", id);
@@ -390,6 +543,7 @@ export default function App() {
   };
 
   if (!device) return <DeviceSelector onSelect={setDevice} />;
+  if (!tabletName) return <TabletNameSetup onSubmit={handleTabletNameSubmit} />;
   if (!changeMode) return <ModeSelector onSelect={setChangeMode} />;
 
   if (loading) return (
@@ -459,17 +613,43 @@ export default function App() {
             {!isMobile && <div style={{fontSize:11, fontWeight:400, color:"rgba(255,255,255,0.6)", letterSpacing:"0.1em"}}>CAISSE ENREGISTREUSE</div>}
           </div>
         </div>
-        <nav style={S.nav}>
-          {[
-            {key:"caisse",     label:"Caisse",     icon:<ShoppingCart size={16}/>},
-            {key:"historique", label:"Historique", icon:<Clock size={16}/>},
-            {key:"parametres", label:"Paramètres", icon:<Settings size={16}/>},
-          ].map(t => (
-            <button key={t.key} style={S.navBtn(tab===t.key)} onClick={() => setTab(t.key)}>
-              {t.icon}{!isMobile && t.label}
-            </button>
-          ))}
-        </nav>
+        <div style={{display:"flex", alignItems:"center", gap:isMobile?8:16}}>
+          {(!isOnline || !supabaseReachable || pendingTransactions.length > 0) ? (
+            <div
+              title={!isOnline ? "Aucune connexion réseau" : !supabaseReachable ? "Serveur injoignable" : "Synchronisation en attente"}
+              style={{
+                display:"flex", alignItems:"center", gap:6, padding:isMobile?"5px 8px":"6px 12px",
+                borderRadius:20, background:"rgba(255,255,255,0.15)", color:"#FFD9A0",
+                fontSize:12, fontWeight:600, whiteSpace:"nowrap"
+              }}
+            >
+              <WifiOff size={14}/>
+              {!isMobile && <span>{!isOnline || !supabaseReachable ? "Hors ligne" : "Synchronisation…"}</span>}
+              {pendingTransactions.length > 0 && (
+                <span style={{background:"#F5A623", color:"#1a1000", borderRadius:10, padding:"1px 7px", fontSize:11, fontWeight:800}}>
+                  {pendingTransactions.length}
+                </span>
+              )}
+            </div>
+          ) : (
+            !isMobile && (
+              <div title="Connecté" style={{display:"flex", alignItems:"center", gap:6, color:"rgba(255,255,255,0.55)", fontSize:12}}>
+                <Wifi size={14}/>
+              </div>
+            )
+          )}
+          <nav style={S.nav}>
+            {[
+              {key:"caisse",     label:"Caisse",     icon:<ShoppingCart size={16}/>},
+              {key:"historique", label:"Historique", icon:<Clock size={16}/>},
+              {key:"parametres", label:"Paramètres", icon:<Settings size={16}/>},
+            ].map(t => (
+              <button key={t.key} style={S.navBtn(tab===t.key)} onClick={() => setTab(t.key)}>
+                {t.icon}{!isMobile && t.label}
+              </button>
+            ))}
+          </nav>
+        </div>
       </header>
 
       <main style={S.content}>
@@ -877,6 +1057,7 @@ export default function App() {
                 {key:"apparence",  label:"Apparence",  icon:<Palette size={15}/>},
                 {key:"categories", label:"Catégories", icon:<Tag size={15}/>},
                 {key:"articles",   label:"Articles",   icon:<Package size={15}/>},
+                {key:"tablettes",  label:"Tablettes",  icon:<Tablet size={15}/>},
               ].map(t => (
                 <button key={t.key} style={S.subTab(settingsTab===t.key)} onClick={() => setSettingsTab(t.key)}>
                   {t.icon}{t.label}
@@ -1068,6 +1249,68 @@ export default function App() {
                       </div>
                     )
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Tablettes ── */}
+            {settingsTab === "tablettes" && (
+              <div>
+                <div style={{marginBottom:16}}>
+                  <h2 style={{margin:0, fontSize:20, fontWeight:700, color:C.primaryDark}}>Tablettes</h2>
+                  <p style={{margin:"4px 0 0", color:"#888", fontSize:14}}>{tablets.length} tablette(s) enregistrée(s)</p>
+                </div>
+                <div style={{...S.card, marginBottom:20}}>
+                  <div style={S.cardHeader}><span style={S.cardTitle}>Renommer cette tablette</span></div>
+                  <div style={{padding:"14px 20px", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap"}}>
+                    <Tablet size={18} style={{color:C.primary, flexShrink:0}}/>
+                    <input
+                      style={{...S.input, margin:0, flex:1, minWidth:180}}
+                      placeholder="Nom de cette tablette"
+                      value={tabletNameDraft}
+                      onChange={e => setTabletNameDraft(e.target.value)}
+                      onKeyDown={e => e.key==="Enter" && renameTablet(tabletNameDraft)}
+                    />
+                    <button
+                      style={{display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap"}}
+                      onClick={() => renameTablet(tabletNameDraft)}
+                      disabled={renamingTablet || !tabletNameDraft.trim()}
+                    >
+                      {renamingTablet ? <Loader2 size={13} style={{animation:"spin 1s linear infinite"}}/> : <Save size={13}/>} Renommer
+                    </button>
+                  </div>
+                </div>
+                <div style={S.card}>
+                  {tablets.length === 0 ? (
+                    <div style={{padding:"20px", textAlign:"center", color:"#AAB", fontSize:14}}>Aucune tablette synchronisée pour l'instant</div>
+                  ) : (
+                    tablets.map(t => {
+                      const isCurrent = t.name === tabletName;
+                      const stale = !t.last_sync || (Date.now() - new Date(t.last_sync).getTime() > 24*3600*1000);
+                      const devInfo = DEVICES.find(d => d.key === t.device_type);
+                      const TInfoIcon = devInfo?.Icon;
+                      return (
+                        <div key={t.id} style={{...S.settingsRow, background:isCurrent?C.primaryLight:"transparent"}}>
+                          {TInfoIcon ? <TInfoIcon size={20} style={{color:C.primary, flexShrink:0}}/> : <Tablet size={20} style={{color:"#AAB", flexShrink:0}}/>}
+                          <div style={{flex:1, minWidth:0}}>
+                            <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+                              <span style={{fontWeight:700, fontSize:14}}>{t.name}</span>
+                              {isCurrent && (
+                                <span style={{fontSize:11, fontWeight:700, background:C.primary, color:"white", padding:"2px 9px", borderRadius:20}}>Cette tablette</span>
+                              )}
+                              {stale && (
+                                <span style={{fontSize:11, fontWeight:700, background:"#FFF0F0", color:"#CC3333", padding:"2px 9px", borderRadius:20}}>Non synchronisée +24h</span>
+                              )}
+                            </div>
+                            <div style={{fontSize:12, color:"#888", marginTop:2}}>
+                              {devInfo?.label || t.device_type || "Appareil inconnu"} · Dernière sync : {t.last_sync ? `${formatDate(t.last_sync)} ${formatTime(t.last_sync)}` : "jamais"}
+                              {t.pending_count > 0 && <> · {t.pending_count} en attente</>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
