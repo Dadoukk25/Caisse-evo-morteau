@@ -4,7 +4,7 @@ import {
   ShoppingCart, Clock, Settings, Plus, Minus, Trash2,
   CheckCircle, Edit3, X, Save, ArrowRight, RotateCcw,
   Loader2, WifiOff, Wifi, AlertTriangle, Tag, Palette, Package,
-  Monitor, Tablet, Smartphone
+  Monitor, Tablet, Smartphone, Calendar, Hash
 } from "lucide-react";
 
 const DEFAULTS = { primary:"#003B8E", accent:"#F5A623", background:"#F4F6FB" };
@@ -36,6 +36,8 @@ const DEVICES = [
   { key:"iphone",         label:"iPhone",           sublabel:"Téléphone Apple",              Icon:Smartphone },
   { key:"android-phone",  label:"Android",          sublabel:"Téléphone sous Android",       Icon:Smartphone },
 ];
+
+const LETTERS = Array.from({ length:26 }, (_, i) => String.fromCharCode(65+i));
 
 function DeviceSelector({ onSelect }) {
   const [hovered, setHovered] = useState(null);
@@ -135,6 +137,7 @@ function ModeSelector({ onSelect }) {
 
 function TabletNameSetup({ onSubmit }) {
   const [name, setName] = useState("");
+  const [prefix, setPrefix] = useState("A");
   const trimmed = name.trim();
   return (
     <div style={{
@@ -156,13 +159,25 @@ function TabletNameSetup({ onSubmit }) {
           autoFocus
           value={name}
           onChange={e => setName(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && trimmed) onSubmit(trimmed); }}
+          onKeyDown={e => { if (e.key === "Enter" && trimmed) onSubmit(trimmed, prefix); }}
           placeholder="Nom de la tablette"
           style={{ padding:"16px 18px", borderRadius:14, border:"1.5px solid #E0E4F0", fontSize:16, outline:"none", boxSizing:"border-box" }}
         />
+        <div>
+          <label style={{ fontSize:13, fontWeight:600, color:"#666", display:"block", marginBottom:6 }}>
+            Lettre des numéros de commande (ex : {prefix}1, {prefix}2…)
+          </label>
+          <select
+            value={prefix}
+            onChange={e => setPrefix(e.target.value)}
+            style={{ width:"100%", padding:"14px 18px", borderRadius:14, border:"1.5px solid #E0E4F0", fontSize:16, outline:"none", boxSizing:"border-box", background:"white" }}
+          >
+            {LETTERS.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
         <button
           disabled={!trimmed}
-          onClick={() => onSubmit(trimmed)}
+          onClick={() => onSubmit(trimmed, prefix)}
           style={{
             padding:"16px", background:trimmed?DEFAULTS.primary:"#C8D0E8", color:"white", border:"none",
             borderRadius:14, fontSize:16, fontWeight:700, cursor:trimmed?"pointer":"default",
@@ -171,6 +186,63 @@ function TabletNameSetup({ onSubmit }) {
         >
           Continuer <ArrowRight size={18}/>
         </button>
+      </div>
+    </div>
+  );
+}
+
+function EventSelector({ events, activeEventId, onSelect }) {
+  const [hovered, setHovered] = useState(null);
+  const options = [{ id:null, name:"Tous les produits", emoji:"🛍️" }, ...events.map(e => ({ id:e.id, name:e.name, emoji:"🎉" }))];
+  return (
+    <div style={{
+      minHeight:"100vh", background:DEFAULTS.background,
+      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+      fontFamily:"'Segoe UI',system-ui,sans-serif", padding:"24px"
+    }}>
+      <div style={{ textAlign:"center", marginBottom:48 }}>
+        <div style={{ fontSize:56, marginBottom:16 }}>🎉</div>
+        <h1 style={{ margin:0, fontSize:28, fontWeight:800, color:DEFAULTS.primary }}>
+          <span style={{ color:DEFAULTS.accent }}>ÉVOLUTION</span> DE MORTEAU
+        </h1>
+        <p style={{ margin:"10px 0 0", color:"#888", fontSize:15 }}>
+          Quel événement souhaitez-vous encaisser ?
+        </p>
+      </div>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:16, justifyContent:"center", maxWidth:900 }}>
+        {options.map(opt => {
+          const optKey = opt.id ?? "none";
+          const isActive = String(opt.id ?? "") === String(activeEventId ?? "");
+          const isHovered = hovered === optKey;
+          return (
+            <button
+              key={optKey}
+              onClick={() => onSelect(opt.id)}
+              onMouseEnter={() => setHovered(optKey)}
+              onMouseLeave={() => setHovered(null)}
+              style={{
+                position:"relative",
+                display:"flex", flexDirection:"column", alignItems:"center", gap:14,
+                padding:"28px 36px", borderRadius:20,
+                border:`2px solid ${(isHovered||isActive) ? DEFAULTS.primary : "#E0E4F0"}`,
+                background: isHovered ? DEFAULTS.primary : isActive ? lighten(DEFAULTS.primary,0.9) : "white",
+                color: isHovered ? "white" : "#1a1a2e",
+                cursor:"pointer", transition:"all 0.18s", minWidth:160,
+                boxShadow: isHovered ? "0 8px 28px rgba(0,59,142,0.25)" : "0 2px 8px rgba(0,0,0,0.06)"
+              }}
+            >
+              {isActive && (
+                <span style={{ position:"absolute", top:-10, right:-10, fontSize:10, fontWeight:700, background:DEFAULTS.primary, color:"white", padding:"3px 9px", borderRadius:20 }}>
+                  ACTUEL
+                </span>
+              )}
+              <span style={{ fontSize:40 }}>{opt.emoji}</span>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontWeight:700, fontSize:16 }}>{opt.name}</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -217,6 +289,27 @@ export default function App() {
   const [renamingTablet, setRenamingTablet]   = useState(false);
   const [tablets, setTablets]                 = useState([]);
 
+  const [tabletPrefix, setTabletPrefix]           = useState(() => localStorage.getItem("tablet_prefix") || "A");
+  const [tabletPrefixDraft, setTabletPrefixDraft] = useState(() => localStorage.getItem("tablet_prefix") || "A");
+  const [orderCounter, setOrderCounter]           = useState(() => {
+    const v = parseInt(localStorage.getItem("order_counter"), 10);
+    return Number.isFinite(v) ? v : 0;
+  });
+  const [orderConfirm, setOrderConfirm]           = useState(null); // { number, total }
+  const [resetTabletCounterConfirm, setResetTabletCounterConfirm] = useState(false);
+  const [eventCounterResetMsg, setEventCounterResetMsg] = useState(null);
+
+  const [events, setEvents]                 = useState([]);
+  const [eventProducts, setEventProducts]   = useState([]); // rows { event_id, product_id }
+  const [activeEventId, setActiveEventId]   = useState(() => localStorage.getItem("active_event_id") || null);
+  const [eventStepDone, setEventStepDone]   = useState(false);
+  const [newEventName, setNewEventName]     = useState("");
+  const [savingEvent, setSavingEvent]       = useState(false);
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [editingEventName, setEditingEventName] = useState("");
+  const [deleteEventConfirm, setDeleteEventConfirm] = useState(null); // { id, name }
+  const [expandedEventId, setExpandedEventId] = useState(null);
+
   const [isOnline, setIsOnline]                   = useState(navigator.onLine);
   const [supabaseReachable, setSupabaseReachable] = useState(true);
   const [pendingTransactions, setPendingTransactions] = useState(() => {
@@ -236,7 +329,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([loadProducts(), loadTransactions(), loadCategories(), loadColors()])
+    Promise.all([loadProducts(), loadTransactions(), loadCategories(), loadColors(), loadEvents(), loadEventProducts()])
       .finally(() => setLoading(false));
   }, []);
 
@@ -320,10 +413,93 @@ export default function App() {
     setTablets(data || []);
   }
 
-  function handleTabletNameSubmit(name) {
+  async function loadEvents() {
+    const { data, error } = await supabase.from("events").select("*").order("name");
+    if (error) return;
+    setEvents(data || []);
+  }
+  async function loadEventProducts() {
+    const { data, error } = await supabase.from("event_products").select("*");
+    if (error) return;
+    setEventProducts(data || []);
+  }
+
+  function handleTabletNameSubmit(name, prefix) {
     localStorage.setItem("tablet_name", name);
     setTabletName(name);
     setTabletNameDraft(name);
+    if (prefix) {
+      localStorage.setItem("tablet_prefix", prefix);
+      setTabletPrefix(prefix);
+      setTabletPrefixDraft(prefix);
+    }
+  }
+
+  function savePrefix(newPrefix) {
+    localStorage.setItem("tablet_prefix", newPrefix);
+    setTabletPrefix(newPrefix);
+    setTabletPrefixDraft(newPrefix);
+  }
+
+  function selectEvent(id) {
+    if (id) localStorage.setItem("active_event_id", id);
+    else localStorage.removeItem("active_event_id");
+    setActiveEventId(id);
+    setEventStepDone(true);
+  }
+
+  function nextOrderNumber() {
+    const next = orderCounter + 1;
+    localStorage.setItem("order_counter", String(next));
+    setOrderCounter(next);
+    return `${tabletPrefix}${next}`;
+  }
+
+  function resetTabletCounter() {
+    localStorage.setItem("order_counter", "0");
+    setOrderCounter(0);
+    setResetTabletCounterConfirm(false);
+  }
+
+  function resetEventCounter() {
+    localStorage.setItem("order_counter", "1");
+    setOrderCounter(1);
+    setEventCounterResetMsg("Compteur réinitialisé sur cette tablette.");
+    setTimeout(() => setEventCounterResetMsg(null), 2500);
+  }
+
+  async function addEvent() {
+    const name = newEventName.trim();
+    if (!name) return;
+    setSavingEvent(true);
+    const { error } = await supabase.from("events").insert([{ name }]);
+    if (error) { alert("Erreur : "+error.message); setSavingEvent(false); return; }
+    setNewEventName(""); setSavingEvent(false); await loadEvents();
+  }
+  async function renameEvent(id, name) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const { error } = await supabase.from("events").update({ name:trimmed }).eq("id", id);
+    if (error) { alert("Erreur : "+error.message); return; }
+    setEditingEventId(null); setEditingEventName(""); await loadEvents();
+  }
+  async function deleteEvent(id) {
+    await supabase.from("event_products").delete().eq("event_id", id);
+    const { error } = await supabase.from("events").delete().eq("id", id);
+    if (error) { alert("Erreur : "+error.message); return; }
+    if (String(activeEventId) === String(id)) selectEvent(null);
+    setDeleteEventConfirm(null);
+    await Promise.all([loadEvents(), loadEventProducts()]);
+  }
+  async function toggleEventProduct(eventId, productId, checked) {
+    if (checked) {
+      const { error } = await supabase.from("event_products").insert([{ event_id:eventId, product_id:productId }]);
+      if (error) { alert("Erreur : "+error.message); return; }
+    } else {
+      const { error } = await supabase.from("event_products").delete().eq("event_id", eventId).eq("product_id", productId);
+      if (error) { alert("Erreur : "+error.message); return; }
+    }
+    await loadEventProducts();
   }
 
   async function renameTablet(newName) {
@@ -387,17 +563,24 @@ export default function App() {
   }
 
   const catNames     = categories.map(c => c.name);
-  const catTabs      = ["Tous", ...catNames];
-  const filtered     = selectedCat === "Tous" ? products : products.filter(p => p.category === selectedCat);
+  const activeEventProductIds = new Set(
+    eventProducts.filter(ep => String(ep.event_id) === String(activeEventId)).map(ep => ep.product_id)
+  );
+  const eventFilteredProducts = activeEventId ? products.filter(p => activeEventProductIds.has(p.id)) : products;
+  const catTabs      = ["Tous", ...Array.from(new Set(eventFilteredProducts.map(p => p.category)))];
+  const filtered     = selectedCat === "Tous" ? eventFilteredProducts : eventFilteredProducts.filter(p => p.category === selectedCat);
   const cartTotal    = cart.reduce((s,i) => s + i.price * i.qty, 0);
   const change       = amountGiven - cartTotal;
   const canEncaisser = cart.length > 0 && amountGiven >= cartTotal;
   const quickAmounts = changeMode === "rendu" ? QUICK_AMOUNTS.filter(a => a >= 1) : QUICK_AMOUNTS;
+  const activeEvent  = activeEventId ? events.find(e => String(e.id) === String(activeEventId)) : null;
 
   useEffect(() => {
     if (catNames.length > 0 && !newProduct.category)
       setNewProduct(p => ({ ...p, category: catNames[0] }));
   }, [categories]);
+
+  useEffect(() => { setSelectedCat("Tous"); }, [activeEventId]);
 
   function addToCart(p) {
     setCart(prev => {
@@ -411,14 +594,18 @@ export default function App() {
   function annulerConfirmation() { setEncaisseStep("saisie"); }
 
   async function confirmerRemise() {
-    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change };
+    const orderNumber = nextOrderNumber();
+    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change, order_number:orderNumber };
     await submitTransaction(tx);
+    setOrderConfirm({ number:orderNumber, total:cartTotal });
     clearCart();
   }
   async function encaisserDirect() {
     if (cart.length === 0) return;
-    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0 };
+    const orderNumber = nextOrderNumber();
+    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0, order_number:orderNumber };
     await submitTransaction(tx);
+    setOrderConfirm({ number:orderNumber, total:cartTotal });
     clearCart();
   }
   async function deleteTransaction(id) {
@@ -544,7 +731,6 @@ export default function App() {
 
   if (!device) return <DeviceSelector onSelect={setDevice} />;
   if (!tabletName) return <TabletNameSetup onSubmit={handleTabletNameSubmit} />;
-  if (!changeMode) return <ModeSelector onSelect={setChangeMode} />;
 
   if (loading) return (
     <div style={{...S.app, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16}}>
@@ -560,6 +746,9 @@ export default function App() {
       <p style={{color:"#888", fontSize:13}}>Vérifie tes variables VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.</p>
     </div>
   );
+
+  if (!eventStepDone) return <EventSelector events={events} activeEventId={activeEventId} onSelect={selectEvent} />;
+  if (!changeMode) return <ModeSelector onSelect={setChangeMode} />;
 
   const currentDevice = DEVICES.find(d => d.key === device);
   const DeviceIcon = currentDevice?.Icon;
@@ -602,6 +791,40 @@ export default function App() {
           </div>
         </div></div>
       )}
+      {deleteEventConfirm && (
+        <div style={S.overlay}><div style={S.modal}>
+          <AlertTriangle size={40} style={{color:"#CC3333", marginBottom:16}}/>
+          <h3 style={{margin:"0 0 8px", fontSize:18}}>Supprimer l'événement "{deleteEventConfirm.name}" ?</h3>
+          <p style={{color:"#888", fontSize:14, margin:"0 0 24px"}}>Cette action est irréversible. Les articles associés seront dissociés.</p>
+          <div style={{display:"flex", gap:12, justifyContent:"center"}}>
+            <button style={{padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer"}} onClick={() => deleteEvent(deleteEventConfirm.id)}>Supprimer</button>
+            <button style={{padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer"}} onClick={() => setDeleteEventConfirm(null)}>Annuler</button>
+          </div>
+        </div></div>
+      )}
+      {resetTabletCounterConfirm && (
+        <div style={S.overlay}><div style={S.modal}>
+          <AlertTriangle size={40} style={{color:"#CC3333", marginBottom:16}}/>
+          <h3 style={{margin:"0 0 8px", fontSize:18}}>Réinitialiser le compteur de commandes ?</h3>
+          <p style={{color:"#888", fontSize:14, margin:"0 0 24px"}}>Le prochain numéro repartira de {tabletPrefix}1, sur cette tablette uniquement.</p>
+          <div style={{display:"flex", gap:12, justifyContent:"center"}}>
+            <button style={{padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer"}} onClick={resetTabletCounter}>Réinitialiser</button>
+            <button style={{padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer"}} onClick={() => setResetTabletCounterConfirm(false)}>Annuler</button>
+          </div>
+        </div></div>
+      )}
+      {orderConfirm && (
+        <div style={S.overlay}><div style={S.modal}>
+          <CheckCircle size={40} style={{color:"#2E7D32", marginBottom:16}}/>
+          <div style={{fontSize:12, color:"#888", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8}}>Étape 2/2 — Confirmation</div>
+          <h3 style={{margin:"0 0 4px", fontSize:15, color:"#555", fontWeight:600}}>Numéro de commande</h3>
+          <div style={{fontSize:48, fontWeight:900, color:C.primaryDark, margin:"8px 0 16px", letterSpacing:"-1px"}}>{orderConfirm.number}</div>
+          <p style={{color:"#888", fontSize:14, margin:"0 0 24px"}}>Total encaissé : {formatPrice(orderConfirm.total)}</p>
+          <button style={{padding:"12px 28px", background:C.primary, color:"white", border:"none", borderRadius:10, fontSize:15, fontWeight:700, cursor:"pointer"}} onClick={() => setOrderConfirm(null)}>
+            Nouvelle vente
+          </button>
+        </div></div>
+      )}
 
       {/* ── HEADER ── */}
       <header style={S.header}>
@@ -614,6 +837,14 @@ export default function App() {
           </div>
         </div>
         <div style={{display:"flex", alignItems:"center", gap:isMobile?8:16}}>
+          <div title="Événement actif" style={{
+            display:"flex", alignItems:"center", gap:6, padding:isMobile?"5px 8px":"6px 12px",
+            borderRadius:20, background:"rgba(255,255,255,0.15)", color:"white",
+            fontSize:12, fontWeight:600, whiteSpace:"nowrap"
+          }}>
+            <span style={{fontSize:14}}>{activeEvent ? "🎉" : "🛍️"}</span>
+            {!isMobile && <span>{activeEvent ? activeEvent.name : "Tous les produits"}</span>}
+          </div>
           {(!isOnline || !supabaseReachable || pendingTransactions.length > 0) ? (
             <div
               title={!isOnline ? "Aucune connexion réseau" : !supabaseReachable ? "Serveur injoignable" : "Synchronisation en attente"}
@@ -918,6 +1149,9 @@ export default function App() {
                     <div style={{fontSize:isMobile?12:13, color:"#888", display:"flex", alignItems:"center", gap:5, flexWrap:"wrap"}}>
                       <Clock size={14}/> {formatDate(tx.created_at)} {formatTime(tx.created_at)}
                       <span style={{marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666"}}>#{transactions.length-i}</span>
+                      {tx.order_number && (
+                        <span style={{background:C.primaryLight, color:C.primary, padding:"2px 10px", borderRadius:20, fontSize:12, fontWeight:700}}>{tx.order_number}</span>
+                      )}
                     </div>
                     <div style={{display:"flex", alignItems:"center", gap:12}}>
                       <span style={{fontSize:isMobile?16:18, fontWeight:800, color:C.primaryDark}}>{formatPrice(tx.total)}</span>
@@ -1051,13 +1285,31 @@ export default function App() {
               </button>
             </div>
 
+            {/* Événement actif + bouton changer */}
+            <div style={{...S.card, marginBottom:20, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12}}>
+              <div style={{display:"flex", alignItems:"center", gap:12}}>
+                <span style={{fontSize:22}}>{activeEvent ? "🎉" : "🛍️"}</span>
+                <div>
+                  <div style={{fontWeight:700, fontSize:15, color:C.primaryDark}}>{activeEvent ? activeEvent.name : "Tous les produits"}</div>
+                  <div style={{fontSize:12, color:"#888", marginTop:2}}>Événement actif</div>
+                </div>
+              </div>
+              <button
+                style={{display:"flex", alignItems:"center", gap:8, padding:"10px 18px", background:"white", color:C.primary, border:`1.5px solid ${C.primary}`, borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer"}}
+                onClick={() => setEventStepDone(false)}
+              >
+                <RotateCcw size={14}/> Changer d'événement
+              </button>
+            </div>
+
             {/* Sous-onglets */}
             <div style={S.subTabBar}>
               {[
-                {key:"apparence",  label:"Apparence",  icon:<Palette size={15}/>},
-                {key:"categories", label:"Catégories", icon:<Tag size={15}/>},
-                {key:"articles",   label:"Articles",   icon:<Package size={15}/>},
-                {key:"tablettes",  label:"Tablettes",  icon:<Tablet size={15}/>},
+                {key:"apparence",   label:"Apparence",   icon:<Palette size={15}/>},
+                {key:"categories",  label:"Catégories",  icon:<Tag size={15}/>},
+                {key:"articles",    label:"Articles",    icon:<Package size={15}/>},
+                {key:"tablettes",   label:"Tablettes",   icon:<Tablet size={15}/>},
+                {key:"evenements",  label:"Événements",  icon:<Calendar size={15}/>},
               ].map(t => (
                 <button key={t.key} style={S.subTab(settingsTab===t.key)} onClick={() => setSettingsTab(t.key)}>
                   {t.icon}{t.label}
@@ -1280,6 +1532,33 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                <div style={{...S.card, marginBottom:20}}>
+                  <div style={S.cardHeader}><span style={S.cardTitle}>Numéro de commande de cette tablette</span></div>
+                  <div style={{padding:"14px 20px", display:"flex", gap:10, alignItems:"center", flexWrap:"wrap"}}>
+                    <Hash size={18} style={{color:C.primary, flexShrink:0}}/>
+                    <div style={{flex:1, minWidth:180}}>
+                      <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Lettre</label>
+                      <select
+                        style={{...S.select, width:140}}
+                        value={tabletPrefixDraft}
+                        onChange={e => { setTabletPrefixDraft(e.target.value); savePrefix(e.target.value); }}
+                      >
+                        {LETTERS.map(l => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    </div>
+                    <div style={{fontSize:13, color:"#888"}}>
+                      Prochain numéro : <strong style={{color:C.primary}}>{tabletPrefix}{orderCounter+1}</strong>
+                    </div>
+                    <button
+                      style={{display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:"#FFF0F0", color:"#CC3333", border:"1.5px solid #CC333330", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap"}}
+                      onClick={() => setResetTabletCounterConfirm(true)}
+                    >
+                      <RotateCcw size={13}/> Réinitialiser le compteur
+                    </button>
+                  </div>
+                </div>
+
                 <div style={S.card}>
                   {tablets.length === 0 ? (
                     <div style={{padding:"20px", textAlign:"center", color:"#AAB", fontSize:14}}>Aucune tablette synchronisée pour l'instant</div>
@@ -1312,6 +1591,114 @@ export default function App() {
                     })
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* ── Événements ── */}
+            {settingsTab === "evenements" && (
+              <div>
+                <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10}}>
+                  <div>
+                    <h2 style={{margin:0, fontSize:20, fontWeight:700, color:C.primaryDark}}>Événements</h2>
+                    <p style={{margin:"4px 0 0", color:"#888", fontSize:14}}>{events.length} événement(s) configuré(s)</p>
+                  </div>
+                  <button
+                    style={{display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:"#FFF0F0", color:"#CC3333", border:"1.5px solid #CC333330", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap"}}
+                    onClick={resetEventCounter}
+                  >
+                    <RotateCcw size={13}/> Réinitialiser le compteur (cette tablette)
+                  </button>
+                </div>
+
+                {eventCounterResetMsg && (
+                  <div style={{marginBottom:16, padding:"10px 16px", background:"#EDFBF0", border:"1.5px solid #5CB872", borderRadius:10, color:"#2E7D32", fontSize:13, fontWeight:600, display:"flex", alignItems:"center", gap:8}}>
+                    <CheckCircle size={16}/> {eventCounterResetMsg}
+                  </div>
+                )}
+
+                <div style={{...S.card, marginBottom:20}}>
+                  <div style={S.cardHeader}><span style={S.cardTitle}>Nouvel événement</span></div>
+                  <div style={{padding:"14px 20px", display:"flex", gap:10, alignItems:"center"}}>
+                    <Calendar size={18} style={{color:C.primary, flexShrink:0}}/>
+                    <input style={{...S.input, margin:0}} placeholder="Nom de l'événement (ex : Fête de la musique)"
+                      value={newEventName} onChange={e => setNewEventName(e.target.value)} onKeyDown={e => e.key==="Enter" && addEvent()}/>
+                    <button style={{display:"flex", alignItems:"center", gap:6, padding:"9px 16px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0}}
+                      onClick={addEvent} disabled={savingEvent}>
+                      {savingEvent ? <Loader2 size={13} style={{animation:"spin 1s linear infinite"}}/> : <Plus size={13}/>} Ajouter
+                    </button>
+                  </div>
+                </div>
+
+                {events.length === 0 ? (
+                  <div style={{...S.card, padding:"20px", textAlign:"center", color:"#AAB", fontSize:14}}>Aucun événement</div>
+                ) : (
+                  events.map(ev => {
+                    const evProductIds = new Set(eventProducts.filter(ep => String(ep.event_id)===String(ev.id)).map(ep => ep.product_id));
+                    const isExpanded = expandedEventId === ev.id;
+                    const isEditing = editingEventId === ev.id;
+                    return (
+                      <div key={ev.id} style={{...S.card, marginBottom:14}}>
+                        <div style={{...S.settingsRow, borderBottom:isExpanded?"1px solid #F0F2F8":"none"}}>
+                          <Calendar size={18} style={{color:C.primary, flexShrink:0}}/>
+                          {isEditing ? (
+                            <input
+                              style={{...S.input, margin:0, flex:1}}
+                              value={editingEventName}
+                              autoFocus
+                              onChange={e => setEditingEventName(e.target.value)}
+                              onKeyDown={e => e.key==="Enter" && renameEvent(ev.id, editingEventName)}
+                            />
+                          ) : (
+                            <span style={{flex:1, fontWeight:600, fontSize:14}}>{ev.name}</span>
+                          )}
+                          <span style={{fontSize:12, color:"#AAB"}}>{evProductIds.size} article(s)</span>
+                          {isEditing ? (
+                            <div style={{display:"flex", gap:6}}>
+                              <button style={S.iconBtn(C.primary)} onClick={() => renameEvent(ev.id, editingEventName)}><Save size={14}/></button>
+                              <button style={S.iconBtn("#666")} onClick={() => { setEditingEventId(null); setEditingEventName(""); }}><X size={14}/></button>
+                            </div>
+                          ) : deleteEventConfirm?.id === ev.id ? (
+                            <div style={{display:"flex", gap:6, alignItems:"center"}}>
+                              <span style={{fontSize:12, color:"#CC3333", fontWeight:600}}>Supprimer ?</span>
+                              <button style={{...S.iconBtn("#CC3333"), border:"none", background:"#CC3333", color:"white"}} onClick={() => deleteEvent(ev.id)}><CheckCircle size={14}/></button>
+                              <button style={{...S.iconBtn("#666"), border:"none"}} onClick={() => setDeleteEventConfirm(null)}><X size={14}/></button>
+                            </div>
+                          ) : (
+                            <div style={{display:"flex", gap:6}}>
+                              <button style={S.iconBtn(C.primary)} onClick={() => setExpandedEventId(isExpanded ? null : ev.id)}>
+                                <Package size={14}/>
+                              </button>
+                              <button style={S.iconBtn(C.primary)} onClick={() => { setEditingEventId(ev.id); setEditingEventName(ev.name); }}><Edit3 size={14}/></button>
+                              <button style={S.iconBtn("#CC3333")} onClick={() => setDeleteEventConfirm(ev)}><Trash2 size={14}/></button>
+                            </div>
+                          )}
+                        </div>
+                        {isExpanded && (
+                          <div style={{padding:"12px 20px 16px"}}>
+                            <p style={{margin:"0 0 10px", fontSize:12, color:"#888"}}>Sélectionnez les articles disponibles pour cet événement :</p>
+                            {products.length === 0 ? (
+                              <p style={{fontSize:13, color:"#AAB"}}>Aucun article dans le catalogue.</p>
+                            ) : (
+                              <div style={{display:"grid", gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(220px,1fr))", gap:8}}>
+                                {products.map(p => {
+                                  const checked = evProductIds.has(p.id);
+                                  return (
+                                    <label key={p.id} style={{display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, border:`1.5px solid ${checked?C.primary:"#E8EAF0"}`, background:checked?C.primaryLight:"white", cursor:"pointer", fontSize:13}}>
+                                      <input type="checkbox" checked={checked} onChange={e => toggleEventProduct(ev.id, p.id, e.target.checked)}/>
+                                      <span>{p.emoji}</span>
+                                      <span style={{flex:1, fontWeight:600}}>{p.name}</span>
+                                      <span style={{color:"#888"}}>{formatPrice(p.price)}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
 
