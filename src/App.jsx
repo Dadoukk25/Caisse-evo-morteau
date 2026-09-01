@@ -4,8 +4,26 @@ import {
   ShoppingCart, Clock, Settings, Plus, Minus, Trash2,
   CheckCircle, Edit3, X, Save, ArrowRight, RotateCcw,
   Loader2, WifiOff, Wifi, AlertTriangle, Tag, Palette, Package,
-  Monitor, Tablet, Smartphone, Calendar, Hash
+  Monitor, Tablet, Smartphone, Calendar, Hash, Lock, FileText,
+  Maximize2, Minimize2
 } from "lucide-react";
+
+const PIN_CODE = "2550";
+const PIN_STORAGE_KEY = "pin_unlocked_until";
+const PIN_DURATION_MS = 2 * 60 * 60 * 1000; // 2 heures
+const SUMUP_COMMISSION = 0.0175; // 1,75 %
+
+function isPinUnlocked() {
+  const until = parseInt(localStorage.getItem(PIN_STORAGE_KEY), 10);
+  return Number.isFinite(until) && Date.now() < until;
+}
+function unlockPin() {
+  localStorage.setItem(PIN_STORAGE_KEY, String(Date.now() + PIN_DURATION_MS));
+}
+function txTabletPrefix(tx) {
+  const n = (tx.order_number || "").trim();
+  return n ? n[0].toUpperCase() : "?";
+}
 
 const DEFAULTS = { primary:"#003B8E", accent:"#F5A623", background:"#F4F6FB" };
 
@@ -248,6 +266,57 @@ function EventSelector({ events, activeEventId, onSelect }) {
   );
 }
 
+function PinModal({ C, onSuccess, onCancel }) {
+  const [entry, setEntry] = useState("");
+  const [error, setError] = useState(false);
+
+  function press(d) {
+    setError(false);
+    setEntry(prev => {
+      const next = (prev + d).slice(0, 4);
+      if (next.length === 4) {
+        if (next === PIN_CODE) { setTimeout(() => onSuccess(), 120); }
+        else { setTimeout(() => { setError(true); setEntry(""); }, 120); }
+      }
+      return next;
+    });
+  }
+  function back() { setError(false); setEntry(prev => prev.slice(0, -1)); }
+
+  const keyBtn = {
+    fontSize: 24, fontWeight: 700, padding: "18px 0", borderRadius: 12,
+    border: "1.5px solid #E0E4F0", background: "white", color: "#1a1a2e", cursor: "pointer",
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}>
+      <div style={{ background:"white", borderRadius:16, padding:28, width:"90%", maxWidth:340, textAlign:"center", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" }}>
+        <Lock size={34} style={{ color:C.primary, marginBottom:12 }}/>
+        <h3 style={{ margin:"0 0 4px", fontSize:18 }}>Accès aux Paramètres</h3>
+        <p style={{ margin:"0 0 18px", color:"#888", fontSize:13 }}>Saisissez le code PIN à 4 chiffres</p>
+        <div style={{ display:"flex", gap:12, justifyContent:"center", marginBottom:14 }}>
+          {[0,1,2,3].map(i => (
+            <div key={i} style={{
+              width:16, height:16, borderRadius:"50%",
+              background: entry.length > i ? C.primary : "transparent",
+              border:`2px solid ${error ? "#CC3333" : C.primary}`,
+            }}/>
+          ))}
+        </div>
+        {error && <p style={{ color:"#CC3333", fontSize:13, fontWeight:600, margin:"0 0 12px" }}>Code PIN incorrect</p>}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10 }}>
+          {["1","2","3","4","5","6","7","8","9"].map(d => (
+            <button key={d} style={keyBtn} onClick={() => press(d)}>{d}</button>
+          ))}
+          <button style={{ ...keyBtn, border:"none", background:"transparent", fontSize:14, color:"#888" }} onClick={onCancel}>Annuler</button>
+          <button style={keyBtn} onClick={() => press("0")}>0</button>
+          <button style={{ ...keyBtn, fontSize:16 }} onClick={back}>⌫</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [device, setDevice]              = useState(null);
   const [changeMode, setChangeMode]      = useState(null); // "rendu" | "sans_rendu"
@@ -276,6 +345,11 @@ export default function App() {
   const [historyView, setHistoryView]                 = useState("liste"); // "liste" | "articles"
   const [selectedArticle, setSelectedArticle]          = useState(null); // nom de l'article sélectionné
   const [articleDateFilter, setArticleDateFilter]      = useState("tout"); // "tout" | "YYYY-MM-DD"
+  const [tabletFilter, setTabletFilter]                = useState("tout"); // "tout" | lettre de préfixe
+  const [exportingPdf, setExportingPdf]               = useState(false);
+
+  const [pinModalOpen, setPinModalOpen]              = useState(false);
+  const [paymentMethod, setPaymentMethod]           = useState("especes"); // "especes" | "cb"
 
   const [newCatName, setNewCatName]              = useState("");
   const [deleteCatConfirm, setDeleteCatConfirm]  = useState(null);
@@ -317,8 +391,18 @@ export default function App() {
     catch { return []; }
   });
 
+  const [wakeLockActive, setWakeLockActive] = useState(false);
+  const [isFullscreen, setIsFullscreen]     = useState(false);
+
   const isMobile = device === "iphone" || device === "android-phone";
   const isTablet = device === "ipad" || device === "android-tablet";
+
+  // Flux de démarrage terminé : device, tablette, événement et mode de rendu choisis
+  const startupDone = !!(device && tabletName && eventStepDone && changeMode);
+
+  // Le plein écran n'est pas supporté sur Safari iOS → on masquera le bouton
+  const fullscreenSupported =
+    typeof document !== "undefined" && !!document.fullscreenEnabled;
 
   const C = {
     primary:      colors.primary,
@@ -359,6 +443,62 @@ export default function App() {
   useEffect(() => {
     if (settingsTab === "tablettes") loadTablets();
   }, [settingsTab]);
+
+  // Re-demande le PIN automatiquement à l'expiration des 2 heures
+  useEffect(() => {
+    if (tab !== "parametres") return;
+    const check = () => {
+      if (!isPinUnlocked()) { setTab("caisse"); setPinModalOpen(true); }
+    };
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
+  }, [tab]);
+
+  // ── Wake Lock : empêche la mise en veille de l'écran ──
+  useEffect(() => {
+    if (!startupDone) return;
+    if (!("wakeLock" in navigator)) return; // non supporté → on ignore silencieusement
+
+    let wakeLock = null;
+    let cancelled = false;
+
+    async function requestWakeLock() {
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        if (cancelled) { try { await wakeLock.release(); } catch {} return; }
+        setWakeLockActive(true);
+        wakeLock.addEventListener?.("release", () => setWakeLockActive(false));
+      } catch (e) {
+        console.log("Wake Lock non supporté");
+        setWakeLockActive(false);
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") requestWakeLock();
+    }
+
+    requestWakeLock();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      try { wakeLock && wakeLock.release(); } catch {}
+      setWakeLockActive(false);
+    };
+  }, [startupDone]);
+
+  // ── Suivi de l'état plein écran ──
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(!!document.fullscreenElement);
+    }
+    handleFullscreenChange();
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
   async function loadProducts() {
     const { data, error } = await supabase.from("products").select("*").order("category").order("name");
@@ -589,13 +729,34 @@ export default function App() {
     });
   }
   function updateQty(id, delta) { setCart(prev => prev.map(i => i.id===id?{...i,qty:i.qty+delta}:i).filter(i=>i.qty>0)); }
-  function clearCart() { setCart([]); setAmountGiven(0); setEncaisseStep("saisie"); }
+  function clearCart() { setCart([]); setAmountGiven(0); setEncaisseStep("saisie"); setPaymentMethod("especes"); }
   function goToConfirmation() { if (canEncaisser) setEncaisseStep("confirmation"); }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }
+
+  function selectTab(key) {
+    if (key === "parametres" && !isPinUnlocked()) { setPinModalOpen(true); return; }
+    setTab(key);
+  }
   function annulerConfirmation() { setEncaisseStep("saisie"); }
 
   async function confirmerRemise() {
     const orderNumber = nextOrderNumber();
-    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change, order_number:orderNumber };
+    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change, order_number:orderNumber, payment_method:"especes" };
+    await submitTransaction(tx);
+    setOrderConfirm({ number:orderNumber, total:cartTotal });
+    clearCart();
+  }
+  async function confirmerCB() {
+    if (cart.length === 0) return;
+    const orderNumber = nextOrderNumber();
+    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0, order_number:orderNumber, payment_method:"cb" };
     await submitTransaction(tx);
     setOrderConfirm({ number:orderNumber, total:cartTotal });
     clearCart();
@@ -603,7 +764,7 @@ export default function App() {
   async function encaisserDirect() {
     if (cart.length === 0) return;
     const orderNumber = nextOrderNumber();
-    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0, order_number:orderNumber };
+    const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0, order_number:orderNumber, payment_method:"especes" };
     await submitTransaction(tx);
     setOrderConfirm({ number:orderNumber, total:cartTotal });
     clearCart();
@@ -617,6 +778,124 @@ export default function App() {
     const { error } = await supabase.from("transactions").delete().neq("id", 0);
     if (error) { alert("Erreur : "+error.message); return; }
     setClearHistoryConfirm(false); await loadTransactions();
+  }
+
+  async function exportHistoriquePDF() {
+    setExportingPdf(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const eur = n => Number(n || 0).toFixed(2).replace(".", ",") + " EUR";
+      const rows = filteredTx;
+      const now = new Date();
+      const doc = new jsPDF();
+
+      let periode;
+      if (articleDateFilter !== "tout") {
+        periode = formatDate(articleDateFilter);
+      } else if (rows.length > 0) {
+        const times = rows.map(t => new Date(t.created_at).getTime());
+        periode = `${formatDate(new Date(Math.min(...times)))} - ${formatDate(new Date(Math.max(...times)))}`;
+      } else {
+        periode = "aucune donnee";
+      }
+
+      const caTotal      = rows.reduce((s, t) => s + Number(t.total), 0);
+      const nbTx         = rows.length;
+      const totalCB      = rows.filter(t => t.payment_method === "cb").reduce((s, t) => s + Number(t.total), 0);
+      const totalEspeces = rows.filter(t => t.payment_method !== "cb").reduce((s, t) => s + Number(t.total), 0);
+      const commission   = totalCB * SUMUP_COMMISSION;
+      const netCB        = totalCB - commission;
+
+      // ── En-tête ──
+      doc.setFontSize(18); doc.setFont(undefined, "bold");
+      doc.text("EVOLUTION DE MORTEAU", 14, 18);
+      doc.setFontSize(10); doc.setFont(undefined, "normal");
+      doc.text(`Rapport genere le ${formatDate(now)} a ${formatTime(now)}`, 14, 25);
+      doc.text(`Periode couverte : ${periode}`, 14, 30);
+      let headBottom = 34;
+      if (tabletFilter !== "tout") { doc.text(`Filtre tablette : ${tabletFilter}`, 14, 35); headBottom = 39; }
+
+      // ── Synthèse ──
+      autoTable(doc, {
+        startY: headBottom + 2,
+        head: [["Synthese de la periode", ""]],
+        body: [
+          ["Chiffre d'affaires total", eur(caTotal)],
+          ["Nombre de transactions", String(nbTx)],
+          ["Total Especes", eur(totalEspeces)],
+          ["Total CB", eur(totalCB)],
+        ],
+        theme: "grid",
+        headStyles: { fillColor: [0, 59, 142] },
+      });
+
+      // ── SumUp ──
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 6,
+        head: [["SumUp (CB)", ""]],
+        body: [
+          ["Montant total CB", eur(totalCB)],
+          ["Commission SumUp (1,75%)", "- " + eur(commission)],
+          ["Net CB apres commission", eur(netCB)],
+        ],
+        theme: "grid",
+        headStyles: { fillColor: [0, 59, 142] },
+      });
+
+      // ── CA par catégorie ──
+      const prodById = {};
+      products.forEach(p => { prodById[p.id] = p; });
+      const catMap = {};
+      rows.forEach(t => (t.items || []).forEach(it => {
+        const cat = prodById[it.id]?.category || "Autre";
+        catMap[cat] = (catMap[cat] || 0) + it.price * it.qty;
+      }));
+      const catRows = Object.entries(catMap).sort((a, b) => b[1] - a[1]).map(([c, v]) => [c, eur(v)]);
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 6,
+        head: [["CA par categorie", "Montant"]],
+        body: catRows.length ? catRows : [["-", eur(0)]],
+        theme: "striped",
+        headStyles: { fillColor: [0, 59, 142] },
+      });
+
+      // ── CA par article ──
+      const artRows = articleStatsList.map(a => [a.name, String(a.qty), eur(a.total)]);
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 6,
+        head: [["Article", "Qte", "CA"]],
+        body: artRows.length ? artRows : [["-", "0", eur(0)]],
+        theme: "striped",
+        headStyles: { fillColor: [0, 59, 142] },
+      });
+
+      // ── CA par tablette ──
+      const tabMap = {};
+      rows.forEach(t => {
+        const p = txTabletPrefix(t);
+        if (!tabMap[p]) tabMap[p] = { ca: 0, nb: 0 };
+        tabMap[p].ca += Number(t.total);
+        tabMap[p].nb += 1;
+      });
+      const tabRows = Object.entries(tabMap).sort((a, b) => b[1].ca - a[1].ca)
+        .map(([p, v]) => [p, String(v.nb), eur(v.ca)]);
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 6,
+        head: [["Tablette", "Transactions", "CA"]],
+        body: tabRows.length ? tabRows : [["-", "0", eur(0)]],
+        theme: "striped",
+        headStyles: { fillColor: [0, 59, 142] },
+      });
+
+      doc.save(`rapport-caisse-${dayKey(now)}.pdf`);
+    } catch (e) {
+      alert("Erreur lors de la generation du PDF : " + e.message);
+    } finally {
+      setExportingPdf(false);
+    }
   }
   async function addProduct() {
     if (!newProduct.name || !newProduct.price || !newProduct.category) return;
@@ -658,27 +937,33 @@ export default function App() {
     setDeleteCatConfirm(null); await loadCategories();
   }
 
+  const dayKey = d0 => {
+    const d = new Date(d0);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+
   const today     = new Date().toDateString();
-  const txToday   = transactions.filter(t => new Date(t.created_at).toDateString() === today);
-  const totalJour = txToday.reduce((s,t) => s+Number(t.total), 0);
 
   // Liste des jours distincts présents dans l'historique (pour le filtre)
-  const availableDates = Array.from(new Set(transactions.map(t => {
-    const d = new Date(t.created_at);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  }))).sort().reverse();
+  const availableDates = Array.from(new Set(transactions.map(t => dayKey(t.created_at)))).sort().reverse();
 
-  // Stats agrégées par article (nom), sur les transactions filtrées par date
-  const txForArticleStats = articleDateFilter === "tout"
-    ? transactions
-    : transactions.filter(t => {
-        const d = new Date(t.created_at);
-        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        return key === articleDateFilter;
-      });
+  // Tablettes détectées depuis le préfixe des numéros de commande
+  const historyTablets = Array.from(new Set(
+    transactions.map(txTabletPrefix).filter(p => p && p !== "?")
+  )).sort();
+
+  const matchesTabletFilter = t => tabletFilter === "tout" || txTabletPrefix(t) === tabletFilter;
+  const matchesDateFilter   = t => articleDateFilter === "tout" || dayKey(t.created_at) === articleDateFilter;
+
+  // Transactions filtrées (date + tablette) — partagées liste / par article / export PDF
+  const filteredTx = transactions.filter(t => matchesDateFilter(t) && matchesTabletFilter(t));
+
+  // Stats du jour (filtrées par tablette uniquement)
+  const txToday   = transactions.filter(t => new Date(t.created_at).toDateString() === today && matchesTabletFilter(t));
+  const totalJour = txToday.reduce((s,t) => s+Number(t.total), 0);
 
   const articleStatsMap = {};
-  txForArticleStats.forEach(t => {
+  filteredTx.forEach(t => {
     (t.items||[]).forEach(item => {
       if (!articleStatsMap[item.name]) {
         articleStatsMap[item.name] = { name:item.name, emoji:item.emoji, qty:0, total:0 };
@@ -757,7 +1042,32 @@ export default function App() {
     <div style={S.app}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
+      {/* ── Bouton plein écran (masqué si non supporté, ex. Safari iOS) ── */}
+      {startupDone && fullscreenSupported && (
+        <button
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Quitter le plein écran" : "Passer en plein écran"}
+          style={{
+            position:"fixed", bottom:20, left:20, zIndex:9999,
+            width:44, height:44, borderRadius:"50%",
+            border:"none", cursor:"pointer",
+            background:"rgba(0,0,0,0.3)", color:"white",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            padding:0, lineHeight:0
+          }}
+        >
+          {isFullscreen ? <Minimize2 size={20}/> : <Maximize2 size={20}/>}
+        </button>
+      )}
+
       {/* ── Modals ── */}
+      {pinModalOpen && (
+        <PinModal
+          C={C}
+          onSuccess={() => { unlockPin(); setPinModalOpen(false); setTab("parametres"); }}
+          onCancel={() => setPinModalOpen(false)}
+        />
+      )}
       {deleteTxConfirm && (
         <div style={S.overlay}><div style={S.modal}>
           <AlertTriangle size={40} style={{color:"#CC3333", marginBottom:16}}/>
@@ -845,6 +1155,19 @@ export default function App() {
             <span style={{fontSize:14}}>{activeEvent ? "🎉" : "🛍️"}</span>
             {!isMobile && <span>{activeEvent ? activeEvent.name : "Tous les produits"}</span>}
           </div>
+          {wakeLockActive && (
+            <div title="Mise en veille de l'écran désactivée" style={{
+              display:"flex", alignItems:"center", gap:6, padding:isMobile?"5px 8px":"6px 12px",
+              borderRadius:20, background:"rgba(255,255,255,0.15)", color:"white",
+              fontSize:12, fontWeight:600, whiteSpace:"nowrap"
+            }}>
+              <span style={{
+                width:8, height:8, borderRadius:"50%", background:"#3BD671",
+                display:"inline-block", boxShadow:"0 0 6px #3BD671", flexShrink:0
+              }}/>
+              {!isMobile && <span>Écran actif</span>}
+            </div>
+          )}
           {(!isOnline || !supabaseReachable || pendingTransactions.length > 0) ? (
             <div
               title={!isOnline ? "Aucune connexion réseau" : !supabaseReachable ? "Serveur injoignable" : "Synchronisation en attente"}
@@ -875,7 +1198,7 @@ export default function App() {
               {key:"historique", label:"Historique", icon:<Clock size={16}/>},
               {key:"parametres", label:"Paramètres", icon:<Settings size={16}/>},
             ].map(t => (
-              <button key={t.key} style={S.navBtn(tab===t.key)} onClick={() => setTab(t.key)}>
+              <button key={t.key} style={S.navBtn(tab===t.key)} onClick={() => selectTab(t.key)}>
                 {t.icon}{!isMobile && t.label}
               </button>
             ))}
@@ -1018,39 +1341,85 @@ export default function App() {
                           <span style={{fontSize:12, color:"#AAB", background:"#F0F2F8", padding:"3px 10px", borderRadius:20}}>Saisie du règlement</span>
                         </div>
                         <div style={S.monnaieSection}>
-                          <div style={{fontSize:13, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:"0.05em"}}>Somme reçue</div>
-                          <div style={S.quickGrid}>
-                            {quickAmounts.map(a => (
-                              <button key={a} style={S.quickBtn}
-                                onClick={() => setAmountGiven(prev => Math.round((prev+a)*100)/100)}
-                                onMouseEnter={e => { e.currentTarget.style.background=C.primary; e.currentTarget.style.color="white"; }}
-                                onMouseLeave={e => { e.currentTarget.style.background="white"; e.currentTarget.style.color=C.primary; }}
+                          {/* Choix du mode de paiement */}
+                          <div style={{fontSize:13, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:"0.05em"}}>Mode de paiement</div>
+                          <div style={{display:"flex", gap:10, marginBottom:16}}>
+                            {[
+                              {key:"especes", label:"Espèces", icon:"💵"},
+                              {key:"cb",      label:"CB",      icon:"💳"},
+                            ].map(m => {
+                              const active = paymentMethod === m.key;
+                              return (
+                                <button key={m.key}
+                                  onClick={() => { setPaymentMethod(m.key); setAmountGiven(m.key === "cb" ? cartTotal : 0); }}
+                                  style={{
+                                    flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                                    padding:isMobile?"16px":"14px", borderRadius:12, cursor:"pointer",
+                                    border:`2px solid ${active ? C.primary : "#E0E4F0"}`,
+                                    background: active ? C.primaryLight : "white",
+                                    color: active ? C.primaryDark : "#666",
+                                    fontSize:isMobile?16:15, fontWeight:active?700:500,
+                                  }}
+                                >
+                                  <span style={{fontSize:20}}>{m.icon}</span> {m.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {paymentMethod === "cb" ? (
+                            /* ── Paiement par CB : montant exact, pas de calculette ── */
+                            <>
+                              <div style={{background:"#F4F6FB", borderRadius:10, padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14}}>
+                                <span style={{fontSize:13, color:"#666"}}>Montant CB</span>
+                                <span style={{fontSize:22, fontWeight:800, color:C.primaryDark}}>{formatPrice(cartTotal)}</span>
+                              </div>
+                              <button
+                                style={{width:"100%", padding:isMobile?"18px":"16px", background:cart.length>0?C.primary:"#C8D0E8", color:"white", border:"none", borderRadius:12, fontSize:isMobile?18:17, fontWeight:800, cursor:cart.length>0?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
+                                onClick={confirmerCB}
+                                onMouseEnter={e => { if(cart.length>0) e.currentTarget.style.background=C.primaryDark; }}
+                                onMouseLeave={e => { if(cart.length>0) e.currentTarget.style.background=C.primary; }}
                               >
-                                {a<1 ? `${Math.round(a*100)} c` : `${a} €`}
+                                <CheckCircle size={20}/> Encaisser par CB
                               </button>
-                            ))}
-                          </div>
-                          <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
-                            <div style={{flex:1, background:"#F4F6FB", borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-                              <span style={{fontSize:13, color:"#666"}}>Reçu</span>
-                              <span style={{fontSize:20, fontWeight:800, color:"#333"}}>{formatPrice(amountGiven)}</span>
-                            </div>
-                            <button style={{border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600"}} onClick={() => setAmountGiven(0)}>✕ Effacer</button>
-                          </div>
-                          {amountGiven > 0 && (
-                            <div style={S.changeDisplay(change>=0)}>
-                              <span style={{fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828"}}>{change>=0?"Monnaie à rendre":"⚠️ Manque"}</span>
-                              <span style={{fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828"}}>{formatPrice(Math.abs(change))}</span>
-                            </div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{fontSize:13, fontWeight:600, color:"#555", marginBottom:10, textTransform:"uppercase", letterSpacing:"0.05em"}}>Somme reçue</div>
+                              <div style={S.quickGrid}>
+                                {quickAmounts.map(a => (
+                                  <button key={a} style={S.quickBtn}
+                                    onClick={() => setAmountGiven(prev => Math.round((prev+a)*100)/100)}
+                                    onMouseEnter={e => { e.currentTarget.style.background=C.primary; e.currentTarget.style.color="white"; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background="white"; e.currentTarget.style.color=C.primary; }}
+                                  >
+                                    {a<1 ? `${Math.round(a*100)} c` : `${a} €`}
+                                  </button>
+                                ))}
+                              </div>
+                              <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
+                                <div style={{flex:1, background:"#F4F6FB", borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                                  <span style={{fontSize:13, color:"#666"}}>Reçu</span>
+                                  <span style={{fontSize:20, fontWeight:800, color:"#333"}}>{formatPrice(amountGiven)}</span>
+                                </div>
+                                <button style={{border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600"}} onClick={() => setAmountGiven(0)}>✕ Effacer</button>
+                              </div>
+                              {amountGiven > 0 && (
+                                <div style={S.changeDisplay(change>=0)}>
+                                  <span style={{fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828"}}>{change>=0?"Monnaie à rendre":"⚠️ Manque"}</span>
+                                  <span style={{fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828"}}>{formatPrice(Math.abs(change))}</span>
+                                </div>
+                              )}
+                              <button
+                                style={{width:"100%", padding:isMobile?"18px":"16px", background:canEncaisser?C.accent:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:isMobile?18:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
+                                onClick={goToConfirmation}
+                                onMouseEnter={e => { if(canEncaisser) e.currentTarget.style.background=darken(C.accent,0.1); }}
+                                onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=C.accent; }}
+                              >
+                                <ArrowRight size={20}/> Valider le calcul
+                              </button>
+                            </>
                           )}
-                          <button
-                            style={{width:"100%", padding:isMobile?"18px":"16px", background:canEncaisser?C.accent:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:isMobile?18:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
-                            onClick={goToConfirmation}
-                            onMouseEnter={e => { if(canEncaisser) e.currentTarget.style.background=darken(C.accent,0.1); }}
-                            onMouseLeave={e => { if(canEncaisser) e.currentTarget.style.background=C.accent; }}
-                          >
-                            <ArrowRight size={20}/> Valider le calcul
-                          </button>
                         </div>
                       </>
                     ) : (
@@ -1135,23 +1504,63 @@ export default function App() {
               ))}
             </div>
 
+            {/* ── Filtres partagés (date + tablette) + export PDF ── */}
+            <div style={{display:"flex", alignItems:"flex-end", gap:12, marginBottom:20, flexWrap:"wrap"}}>
+              <div>
+                <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Par jour</label>
+                <select
+                  style={{...S.select, width:"auto", minWidth:170}}
+                  value={articleDateFilter}
+                  onChange={e => { setArticleDateFilter(e.target.value); setSelectedArticle(null); }}
+                >
+                  <option value="tout">Toute la période</option>
+                  {availableDates.map(d => (
+                    <option key={d} value={d}>{new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"})}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Par tablette</label>
+                <select
+                  style={{...S.select, width:"auto", minWidth:170}}
+                  value={tabletFilter}
+                  onChange={e => { setTabletFilter(e.target.value); setSelectedArticle(null); }}
+                >
+                  <option value="tout">Toutes les tablettes</option>
+                  {historyTablets.map(p => (
+                    <option key={p} value={p}>Tablette {p}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                style={{display:"flex", alignItems:"center", gap:8, padding:"9px 18px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:exportingPdf?"default":"pointer", opacity:exportingPdf?0.7:1, whiteSpace:"nowrap"}}
+                onClick={exportHistoriquePDF}
+                disabled={exportingPdf || filteredTx.length === 0}
+              >
+                {exportingPdf ? <Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/> : <FileText size={15}/>} Exporter PDF
+              </button>
+            </div>
+
             {historyView === "liste" && (
             <>
-            {transactions.length === 0 ? (
+            {filteredTx.length === 0 ? (
               <div style={{textAlign:"center", padding:"60px 20px", color:"#AAB"}}>
                 <Clock size={48} style={{margin:"0 auto 16px", opacity:0.3, display:"block"}}/>
-                <p style={{fontSize:16}}>Aucune transaction pour l'instant</p>
+                <p style={{fontSize:16}}>{transactions.length === 0 ? "Aucune transaction pour l'instant" : "Aucune transaction pour ces filtres"}</p>
               </div>
             ) : (
-              transactions.map((tx, i) => (
+              filteredTx.map((tx, i) => (
                 <div key={tx.id} style={S.txCard}>
                   <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
                     <div style={{fontSize:isMobile?12:13, color:"#888", display:"flex", alignItems:"center", gap:5, flexWrap:"wrap"}}>
                       <Clock size={14}/> {formatDate(tx.created_at)} {formatTime(tx.created_at)}
-                      <span style={{marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666"}}>#{transactions.length-i}</span>
+                      <span style={{marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666"}}>#{filteredTx.length-i}</span>
                       {tx.order_number && (
                         <span style={{background:C.primaryLight, color:C.primary, padding:"2px 10px", borderRadius:20, fontSize:12, fontWeight:700}}>{tx.order_number}</span>
                       )}
+                      <span title={tx.payment_method === "cb" ? "Payé par CB" : "Payé en espèces"} style={{fontSize:14}}>
+                        {tx.payment_method === "cb" ? "💳" : "💵"}
+                      </span>
                     </div>
                     <div style={{display:"flex", alignItems:"center", gap:12}}>
                       <span style={{fontSize:isMobile?16:18, fontWeight:800, color:C.primaryDark}}>{formatPrice(tx.total)}</span>
@@ -1162,6 +1571,7 @@ export default function App() {
                     {(tx.items||[]).map((item,j) => <span key={j}>{item.emoji} {item.name} ×{item.qty}</span>)}
                   </div>
                   <div style={{marginTop:10, display:"flex", gap:16, fontSize:12, color:"#888", flexWrap:"wrap"}}>
+                    <span>Mode : <strong style={{color:"#333"}}>{tx.payment_method === "cb" ? "CB 💳" : "Espèces 💵"}</strong></span>
                     <span>Reçu : <strong style={{color:"#333"}}>{formatPrice(tx.given)}</strong></span>
                     <span>Monnaie rendue : <strong style={{color:"#333"}}>{formatPrice(tx.change)}</strong></span>
                   </div>
@@ -1173,20 +1583,6 @@ export default function App() {
 
             {historyView === "articles" && (
               <div>
-                {/* Filtre par date */}
-                <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:16, flexWrap:"wrap"}}>
-                  <span style={{fontSize:13, color:"#666", fontWeight:600}}>Filtrer par jour :</span>
-                  <select
-                    style={{...S.select, width:"auto", minWidth:160}}
-                    value={articleDateFilter}
-                    onChange={e => { setArticleDateFilter(e.target.value); setSelectedArticle(null); }}
-                  >
-                    <option value="tout">Toute la période</option>
-                    {availableDates.map(d => (
-                      <option key={d} value={d}>{new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"})}</option>
-                    ))}
-                  </select>
-                </div>
 
                 {selectedArticle && selectedArticleStats ? (
                   /* ── Détail d'un article sélectionné ── */
