@@ -26,6 +26,14 @@ function txTabletPrefix(tx) {
 }
 
 const DEFAULTS = { primary:"#003B8E", accent:"#F5A623", background:"#F4F6FB" };
+const EMOJI_SIZE_DEFAULT = 72;
+const EMOJI_SIZE_OPTIONS = [
+  { label:"Petit",      value:40  },
+  { label:"Moyen",      value:56  },
+  { label:"Grand",      value:72  },
+  { label:"Très grand", value:96  },
+  { label:"Géant",      value:128 },
+];
 
 function hexToRgb(hex) {
   const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
@@ -356,6 +364,7 @@ export default function App() {
   const [savingCat, setSavingCat]                = useState(false);
 
   const [colors, setColors]           = useState({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background });
+  const [emojiSize, setEmojiSize]     = useState(EMOJI_SIZE_DEFAULT);
   const [savingColors, setSavingColors] = useState(false);
 
   const [tabletName, setTabletName]           = useState(() => localStorage.getItem("tablet_name") || "");
@@ -525,6 +534,8 @@ export default function App() {
       accent:     map["color_accent"]     || DEFAULTS.accent,
       background: map["color_background"] || DEFAULTS.background,
     });
+    const es = parseInt(map["emoji_size"], 10);
+    setEmojiSize(EMOJI_SIZE_OPTIONS.some(o => o.value === es) ? es : EMOJI_SIZE_DEFAULT);
   }
   async function saveColors() {
     setSavingColors(true);
@@ -532,10 +543,11 @@ export default function App() {
       supabase.from("settings").upsert({ key:"color_primary",    value:colors.primary    }, { onConflict:"key" }),
       supabase.from("settings").upsert({ key:"color_accent",     value:colors.accent     }, { onConflict:"key" }),
       supabase.from("settings").upsert({ key:"color_background", value:colors.background }, { onConflict:"key" }),
+      supabase.from("settings").upsert({ key:"emoji_size",       value:String(emojiSize) }, { onConflict:"key" }),
     ]);
     setSavingColors(false);
   }
-  function resetColors() { setColors({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background }); }
+  function resetColors() { setColors({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background }); setEmojiSize(EMOJI_SIZE_DEFAULT); }
 
   async function pingTablet(name, pendingCount) {
     if (!name) return;
@@ -1246,7 +1258,7 @@ export default function App() {
                         onMouseEnter={e => { e.currentTarget.style.borderColor=C.primary; e.currentTarget.style.background=C.primaryLight; e.currentTarget.style.transform="translateY(-2px)"; }}
                         onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background="white"; e.currentTarget.style.transform="none"; }}
                       >
-                        <span style={{fontSize:isMobile?28:32, lineHeight:1}}>{p.emoji}</span>
+                        <span style={{fontSize:emojiSize, lineHeight:1}}>{p.emoji}</span>
                         <span style={{fontSize:isMobile?12:13, fontWeight:600, color:"#2a2a3e", lineHeight:1.3}}>{p.name}</span>
                         <span style={{fontSize:isMobile?13:14, fontWeight:700, color:C.primary}}>{formatPrice(p.price)}</span>
                       </button>
@@ -1718,7 +1730,7 @@ export default function App() {
               <div>
                 <div style={{marginBottom:16}}>
                   <h2 style={{margin:0, fontSize:20, fontWeight:700, color:C.primaryDark}}>Apparence</h2>
-                  <p style={{margin:"4px 0 0", color:"#888", fontSize:14}}>Personnalise les couleurs de l'application</p>
+                  <p style={{margin:"4px 0 0", color:"#888", fontSize:14}}>Personnalise les couleurs et la taille des emojis de l'application</p>
                 </div>
                 <div style={S.card}>
                   <div style={{padding:"20px", display:"grid", gridTemplateColumns:isMobile?"1fr":isTablet?"1fr 1fr":"1fr 1fr 1fr", gap:20}}>
@@ -1744,6 +1756,25 @@ export default function App() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                  <div style={{margin:"0 20px 20px", padding:16, background:C.background, borderRadius:12, border:"1px solid #E8EAF0"}}>
+                    <label style={{fontSize:13, fontWeight:600, color:"#444", display:"block", marginBottom:4}}>Taille des emojis des articles</label>
+                    <p style={{fontSize:12, color:"#999", margin:"0 0 10px"}}>Taille des logos affichés sur les cartes articles en caisse</p>
+                    <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+                      {EMOJI_SIZE_OPTIONS.map(opt => {
+                        const active = emojiSize === opt.value;
+                        return (
+                          <button key={opt.value} onClick={() => setEmojiSize(opt.value)}
+                            style={{display:"flex", flexDirection:"column", alignItems:"center", gap:6, padding:"10px 14px", minWidth:88,
+                              borderRadius:10, border:`1.5px solid ${active?C.primary:"#D0D6E8"}`, background:active?C.primaryLight:"white",
+                              color:active?C.primaryDark:"#555", fontSize:13, fontWeight:active?600:400, cursor:"pointer"}}>
+                            <span style={{fontSize:Math.min(opt.value, 40), lineHeight:1}}>🛒</span>
+                            <span>{opt.label}</span>
+                            <span style={{fontSize:11, color:"#999"}}>{opt.value}px</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div style={{margin:"0 20px 20px", padding:16, background:C.background, borderRadius:12, border:"1px solid #E8EAF0"}}>
                     <div style={{fontSize:12, color:"#888", fontWeight:600, marginBottom:10, textTransform:"uppercase", letterSpacing:"0.06em"}}>Aperçu</div>
