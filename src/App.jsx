@@ -20,6 +20,39 @@ function isPinUnlocked() {
 function unlockPin() {
   localStorage.setItem(PIN_STORAGE_KEY, String(Date.now() + PIN_DURATION_MS));
 }
+
+// ── Journal des ventes : append-only, jamais effacé automatiquement ──
+const SALES_JOURNAL_KEY = "sales_journal";
+function readSalesJournal() {
+  try { return JSON.parse(localStorage.getItem(SALES_JOURNAL_KEY) || "[]"); }
+  catch { return []; }
+}
+function appendSalesJournal(entry) {
+  try {
+    const journal = readSalesJournal();
+    journal.push(entry);
+    localStorage.setItem(SALES_JOURNAL_KEY, JSON.stringify(journal));
+  } catch {}
+}
+function markSalesJournalSynced(orderNumbers) {
+  try {
+    const wanted = new Set(orderNumbers.map(String));
+    const journal = readSalesJournal().map(e =>
+      wanted.has(String(e.order_number)) && e.status !== "synced" ? { ...e, status: "synced" } : e
+    );
+    localStorage.setItem(SALES_JOURNAL_KEY, JSON.stringify(journal));
+  } catch {}
+}
+function salesJournalEntryFromTx(tx, status) {
+  return {
+    datetime: new Date().toISOString(),
+    order_number: tx.order_number || "",
+    items: (tx.items || []).map(i => ({ name:i.name, emoji:i.emoji, price:i.price, qty:i.qty })),
+    total: tx.total,
+    payment_method: tx.payment_method,
+    status,
+  };
+}
 function txTabletPrefix(tx) {
   const n = (tx.order_number || "").trim();
   return n ? n[0].toUpperCase() : "?";
@@ -51,6 +84,8 @@ function darken(hex, pct=0.15) {
 }
 
 const QUICK_AMOUNTS = [0.10, 0.20, 0.50, 1, 2, 5, 10, 20, 50];
+function toCents(amount)  { return Math.round(amount * 100); }
+function fromCents(cents) { return cents / 100; }
 function formatPrice(p) { return Number(p).toFixed(2).replace(".",",")+" €"; }
 function formatTime(d)  { return new Date(d).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}); }
 function formatDate(d)  { return new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}); }
@@ -161,10 +196,23 @@ function ModeSelector({ onSelect }) {
   );
 }
 
-function TabletNameSetup({ onSubmit }) {
+function TabletNameSetup({ onSubmit, onCheckPrefix }) {
   const [name, setName] = useState("");
   const [prefix, setPrefix] = useState("A");
+  const [checking, setChecking] = useState(false);
+  const [collision, setCollision] = useState(null); // { name } d'une autre tablette active
   const trimmed = name.trim();
+
+  async function handleContinue() {
+    if (!trimmed) return;
+    setChecking(true);
+    let other = null;
+    try { other = onCheckPrefix ? await onCheckPrefix(prefix, trimmed) : null; }
+    catch { other = null; }
+    setChecking(false);
+    if (other) { setCollision(other); return; }
+    onSubmit(trimmed, prefix);
+  }
   return (
     <div style={{
       minHeight:"100vh", background:DEFAULTS.background,
@@ -185,7 +233,7 @@ function TabletNameSetup({ onSubmit }) {
           autoFocus
           value={name}
           onChange={e => setName(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && trimmed) onSubmit(trimmed, prefix); }}
+          onKeyDown={e => { if (e.key === "Enter" && trimmed && !checking) handleContinue(); }}
           placeholder="Nom de la tablette"
           style={{ padding:"16px 18px", borderRadius:14, border:"1.5px solid #E0E4F0", fontSize:16, outline:"none", boxSizing:"border-box" }}
         />
@@ -195,22 +243,35 @@ function TabletNameSetup({ onSubmit }) {
           </label>
           <select
             value={prefix}
-            onChange={e => setPrefix(e.target.value)}
+            onChange={e => { setPrefix(e.target.value); setCollision(null); }}
             style={{ width:"100%", padding:"14px 18px", borderRadius:14, border:"1.5px solid #E0E4F0", fontSize:16, outline:"none", boxSizing:"border-box", background:"white" }}
           >
             {LETTERS.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
+        {collision && (
+          <div style={{ background:"#FFF4E5", border:"1.5px solid #F5A623", borderRadius:14, padding:"12px 14px", fontSize:13, color:"#8A5A00" }}>
+            <div style={{ marginBottom:10 }}>
+              ⚠️ La lettre {prefix} est déjà utilisée par la tablette « {collision.name} ». Choisissez une autre lettre.
+            </div>
+            <button
+              onClick={() => onSubmit(trimmed, prefix)}
+              style={{ padding:"8px 14px", background:"white", color:"#8A5A00", border:"1.5px solid #F5A623", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer" }}
+            >
+              Utiliser quand même
+            </button>
+          </div>
+        )}
         <button
-          disabled={!trimmed}
-          onClick={() => onSubmit(trimmed, prefix)}
+          disabled={!trimmed || checking}
+          onClick={handleContinue}
           style={{
-            padding:"16px", background:trimmed?DEFAULTS.primary:"#C8D0E8", color:"white", border:"none",
-            borderRadius:14, fontSize:16, fontWeight:700, cursor:trimmed?"pointer":"default",
+            padding:"16px", background:(trimmed && !checking)?DEFAULTS.primary:"#C8D0E8", color:"white", border:"none",
+            borderRadius:14, fontSize:16, fontWeight:700, cursor:(trimmed && !checking)?"pointer":"default",
             display:"flex", alignItems:"center", justifyContent:"center", gap:10
           }}
         >
-          Continuer <ArrowRight size={18}/>
+          {checking ? <Loader2 size={18} style={{ animation:"spin 1s linear infinite" }}/> : <>Continuer <ArrowRight size={18}/></>}
         </button>
       </div>
     </div>
@@ -357,6 +418,8 @@ export default function App() {
   const [exportingPdf, setExportingPdf]               = useState(false);
 
   const [pinModalOpen, setPinModalOpen]              = useState(false);
+  const [pinPendingAction, setPinPendingAction]      = useState(null);
+  const [showPendingModal, setShowPendingModal]      = useState(false);
   const [paymentMethod, setPaymentMethod]           = useState("especes"); // "especes" | "cb"
 
   const [newCatName, setNewCatName]              = useState("");
@@ -374,6 +437,8 @@ export default function App() {
 
   const [tabletPrefix, setTabletPrefix]           = useState(() => localStorage.getItem("tablet_prefix") || "A");
   const [tabletPrefixDraft, setTabletPrefixDraft] = useState(() => localStorage.getItem("tablet_prefix") || "A");
+  const [prefixCollision, setPrefixCollision]     = useState(null); // { letter, name } d'une autre tablette
+  const [checkingPrefix, setCheckingPrefix]       = useState(false);
   const [orderCounter, setOrderCounter]           = useState(() => {
     const v = parseInt(localStorage.getItem("order_counter"), 10);
     return Number.isFinite(v) ? v : 0;
@@ -552,11 +617,34 @@ export default function App() {
   async function pingTablet(name, pendingCount) {
     if (!name) return;
     try {
+      // NB : nécessite la colonne "order_prefix" (text) sur la table Supabase "tablets".
       const { error } = await supabase.from("tablets").upsert({
         name, device_type:device, last_sync:new Date().toISOString(), pending_count:pendingCount,
+        order_prefix: localStorage.getItem("tablet_prefix") || "A",
       }, { onConflict:"name" });
       if (error) throw error;
     } catch { /* ping non-bloquant */ }
+  }
+
+  // Vérifie si une autre tablette active (last_sync < 24h) utilise déjà cette lettre.
+  // Renvoie { name } de la tablette en conflit, ou null (dont : hors ligne, erreur, colonne absente).
+  async function checkPrefixCollision(letter, selfName) {
+    if (!navigator.onLine) return null;
+    try {
+      const { data, error } = await supabase
+        .from("tablets")
+        .select("name, order_prefix, last_sync")
+        .eq("order_prefix", letter);
+      if (error || !data) return null;
+      const cutoff = Date.now() - 24 * 3600 * 1000;
+      const other = data.find(t =>
+        t.name && t.name !== selfName &&
+        t.last_sync && new Date(t.last_sync).getTime() > cutoff
+      );
+      return other ? { name: other.name } : null;
+    } catch {
+      return null;
+    }
   }
 
   async function loadTablets() {
@@ -591,6 +679,22 @@ export default function App() {
     localStorage.setItem("tablet_prefix", newPrefix);
     setTabletPrefix(newPrefix);
     setTabletPrefixDraft(newPrefix);
+    if (tabletName) pingTablet(tabletName, pendingTransactions.length);
+  }
+
+  async function changePrefix(newPrefix) {
+    setTabletPrefixDraft(newPrefix);
+    setPrefixCollision(null);
+    setCheckingPrefix(true);
+    const other = await checkPrefixCollision(newPrefix, tabletName);
+    setCheckingPrefix(false);
+    if (other) { setPrefixCollision({ letter:newPrefix, name:other.name }); return; }
+    savePrefix(newPrefix);
+  }
+
+  function forcePrefix(newPrefix) {
+    setPrefixCollision(null);
+    savePrefix(newPrefix);
   }
 
   function selectEvent(id) {
@@ -691,9 +795,11 @@ export default function App() {
       setSupabaseReachable(true);
       await loadTransactions();
       await pingTablet(tabletName, pendingTransactions.length);
+      return true;
     } catch {
       setSupabaseReachable(false);
       queuePendingTransaction(tx);
+      return false;
     }
   }
 
@@ -704,6 +810,7 @@ export default function App() {
     try {
       const { error } = await supabase.from("transactions").insert(stored.map(p => p.tx));
       if (error) throw error;
+      markSalesJournalSynced(stored.map(p => p.tx.order_number));
       localStorage.removeItem("pending_transactions");
       setPendingTransactions([]);
       setSupabaseReachable(true);
@@ -721,8 +828,8 @@ export default function App() {
   const eventFilteredProducts = activeEventId ? products.filter(p => activeEventProductIds.has(p.id)) : products;
   const catTabs      = ["Tous", ...Array.from(new Set(eventFilteredProducts.map(p => p.category)))];
   const filtered     = selectedCat === "Tous" ? eventFilteredProducts : eventFilteredProducts.filter(p => p.category === selectedCat);
-  const cartTotal    = cart.reduce((s,i) => s + i.price * i.qty, 0);
-  const change       = amountGiven - cartTotal;
+  const cartTotal    = Math.round(cart.reduce((s,i) => s + Math.round(i.price*100) * i.qty, 0)) / 100;
+  const change       = Math.round((amountGiven - cartTotal) * 100) / 100;
   const canEncaisser = cart.length > 0 && amountGiven >= cartTotal;
   const quickAmounts = changeMode === "rendu" ? QUICK_AMOUNTS.filter(a => a >= 1) : QUICK_AMOUNTS;
   const activeEvent  = activeEventId ? events.find(e => String(e.id) === String(activeEventId)) : null;
@@ -756,12 +863,18 @@ export default function App() {
     if (key === "parametres" && !isPinUnlocked()) { setPinModalOpen(true); return; }
     setTab(key);
   }
+  function requirePin(action) {
+    if (isPinUnlocked()) { action(); return; }
+    setPinPendingAction(() => action);
+    setPinModalOpen(true);
+  }
   function annulerConfirmation() { setEncaisseStep("saisie"); }
 
   async function confirmerRemise() {
     const orderNumber = nextOrderNumber();
     const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:amountGiven, change, order_number:orderNumber, payment_method:"especes" };
-    await submitTransaction(tx);
+    const synced = await submitTransaction(tx);
+    appendSalesJournal(salesJournalEntryFromTx(tx, synced ? "synced" : "pending"));
     setOrderConfirm({ number:orderNumber, total:cartTotal });
     clearCart();
   }
@@ -769,7 +882,8 @@ export default function App() {
     if (cart.length === 0) return;
     const orderNumber = nextOrderNumber();
     const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0, order_number:orderNumber, payment_method:"cb" };
-    await submitTransaction(tx);
+    const synced = await submitTransaction(tx);
+    appendSalesJournal(salesJournalEntryFromTx(tx, synced ? "synced" : "pending"));
     setOrderConfirm({ number:orderNumber, total:cartTotal });
     clearCart();
   }
@@ -777,7 +891,8 @@ export default function App() {
     if (cart.length === 0) return;
     const orderNumber = nextOrderNumber();
     const tx = { items:cart.map(i=>({id:i.id,name:i.name,emoji:i.emoji,price:i.price,qty:i.qty})), total:cartTotal, given:cartTotal, change:0, order_number:orderNumber, payment_method:"especes" };
-    await submitTransaction(tx);
+    const synced = await submitTransaction(tx);
+    appendSalesJournal(salesJournalEntryFromTx(tx, synced ? "synced" : "pending"));
     setOrderConfirm({ number:orderNumber, total:cartTotal });
     clearCart();
   }
@@ -818,8 +933,8 @@ export default function App() {
       const nbTx         = rows.length;
       const totalCB      = rows.filter(t => t.payment_method === "cb").reduce((s, t) => s + Number(t.total), 0);
       const totalEspeces = rows.filter(t => t.payment_method !== "cb").reduce((s, t) => s + Number(t.total), 0);
-      const commission   = totalCB * SUMUP_COMMISSION;
-      const netCB        = totalCB - commission;
+      const commission   = Math.round(totalCB * SUMUP_COMMISSION * 100) / 100;
+      const netCB        = Math.round((totalCB - commission) * 100) / 100;
 
       // ── En-tête ──
       doc.setFontSize(18); doc.setFont(undefined, "bold");
@@ -909,6 +1024,42 @@ export default function App() {
       setExportingPdf(false);
     }
   }
+
+  function exportSalesJournalCSV() {
+    const journal = readSalesJournal();
+    if (journal.length === 0) { alert("Le journal des ventes est vide."); return; }
+    const esc = v => {
+      const s = String(v ?? "");
+      return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const header = ["Date", "Heure", "N° commande", "Articles", "Total", "Mode paiement", "Statut sync"];
+    const lines = journal.map(e => {
+      const d = new Date(e.datetime);
+      const articles = (e.items || []).map(it => `${it.qty}x ${it.name}`).join(" | ");
+      const mode = e.payment_method === "cb" ? "CB" : "Espèces";
+      const statut = e.status === "synced" ? "Synchronisé" : "En attente";
+      return [
+        formatDate(d),
+        formatTime(d),
+        e.order_number || "",
+        articles,
+        Number(e.total || 0).toFixed(2).replace(".", ","),
+        mode,
+        statut,
+      ].map(esc).join(";");
+    });
+    const csv = "﻿" + [header.join(";"), ...lines].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `journal-ventes-${dayKey(new Date())}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function addProduct() {
     if (!newProduct.name || !newProduct.price || !newProduct.category) return;
     setSaving(true);
@@ -1027,7 +1178,7 @@ export default function App() {
   };
 
   if (!device) return <DeviceSelector onSelect={setDevice} />;
-  if (!tabletName) return <TabletNameSetup onSubmit={handleTabletNameSubmit} />;
+  if (!tabletName) return <TabletNameSetup onSubmit={handleTabletNameSubmit} onCheckPrefix={checkPrefixCollision} />;
 
   if (loading) return (
     <div style={{...S.app, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16}}>
@@ -1076,8 +1227,13 @@ export default function App() {
       {pinModalOpen && (
         <PinModal
           C={C}
-          onSuccess={() => { unlockPin(); setPinModalOpen(false); setTab("parametres"); }}
-          onCancel={() => setPinModalOpen(false)}
+          onSuccess={() => {
+            unlockPin();
+            setPinModalOpen(false);
+            if (pinPendingAction) { const act = pinPendingAction; setPinPendingAction(null); act(); }
+            else { setTab("parametres"); }
+          }}
+          onCancel={() => { setPinModalOpen(false); setPinPendingAction(null); }}
         />
       )}
       {deleteTxConfirm && (
@@ -1099,6 +1255,46 @@ export default function App() {
           <div style={{display:"flex", gap:12, justifyContent:"center"}}>
             <button style={{padding:"10px 24px", background:"#CC3333", color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer"}} onClick={clearAllHistory}>Tout supprimer</button>
             <button style={{padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer"}} onClick={() => setClearHistoryConfirm(false)}>Annuler</button>
+          </div>
+        </div></div>
+      )}
+      {showPendingModal && pendingTransactions.length > 0 && (
+        <div style={S.overlay}><div style={{...S.modal, textAlign:"left", maxWidth:460}}>
+          <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:6}}>
+            <AlertTriangle size={26} style={{color:"#CC3333", flexShrink:0}}/>
+            <h3 style={{margin:0, fontSize:18}}>Ventes en attente de synchronisation</h3>
+          </div>
+          <p style={{color:"#888", fontSize:13, margin:"0 0 16px"}}>
+            {pendingTransactions.length} vente(s) enregistrée(s) localement, pas encore envoyée(s) au serveur.
+          </p>
+          <div style={{maxHeight:340, overflowY:"auto", display:"flex", flexDirection:"column", gap:10}}>
+            {pendingTransactions.map(p => (
+              <div key={p.id} style={{border:"1.5px solid #E0E4F0", borderRadius:10, padding:"10px 12px"}}>
+                <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, fontSize:12, color:"#888"}}>
+                  <span style={{display:"flex", alignItems:"center", gap:5}}>
+                    <Clock size={13}/> {formatTime(p.queued_at)}
+                    {p.tx?.order_number && (
+                      <span style={{background:C.primaryLight, color:C.primary, padding:"1px 8px", borderRadius:20, fontSize:11, fontWeight:700}}>{p.tx.order_number}</span>
+                    )}
+                  </span>
+                  <span style={{fontWeight:800, color:"#1a1a2e", fontSize:14}}>{formatPrice(p.tx?.total || 0)}</span>
+                </div>
+                <div style={{fontSize:13, color:"#555"}}>
+                  {(p.tx?.items || []).map((it, k) => (
+                    <div key={k} style={{display:"flex", justifyContent:"space-between"}}>
+                      <span>{it.emoji ? it.emoji + " " : ""}{it.qty}× {it.name}</span>
+                      <span>{formatPrice(it.price * it.qty)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:11, color:"#999", marginTop:4}}>
+                  {p.tx?.payment_method === "cb" ? "CB" : "Espèces"}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex", gap:12, justifyContent:"flex-end", marginTop:18}}>
+            <button style={{padding:"10px 24px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer"}} onClick={() => setShowPendingModal(false)}>Fermer</button>
           </div>
         </div></div>
       )}
@@ -1179,6 +1375,24 @@ export default function App() {
               }}/>
               {!isMobile && <span>Écran actif</span>}
             </div>
+          )}
+          {pendingTransactions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowPendingModal(true)}
+              title={`${pendingTransactions.length} vente(s) en attente de synchronisation`}
+              style={{
+                display:"flex", alignItems:"center", gap:6, padding:isMobile?"5px 8px":"6px 12px",
+                borderRadius:20, background:"#CC3333", color:"white", border:"none",
+                fontSize:12, fontWeight:700, whiteSpace:"nowrap", cursor:"pointer"
+              }}
+            >
+              <AlertTriangle size={14}/>
+              <span style={{background:"white", color:"#CC3333", borderRadius:10, padding:"1px 7px", fontSize:11, fontWeight:800}}>
+                {pendingTransactions.length}
+              </span>
+              {!isMobile && <span>en attente</span>}
+            </button>
           )}
           {(!isOnline || !supabaseReachable || pendingTransactions.length > 0) ? (
             <div
@@ -1498,7 +1712,7 @@ export default function App() {
                 </div>
                 {transactions.length > 0 && (
                   <button style={{display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer"}}
-                    onClick={() => setClearHistoryConfirm(true)}>
+                    onClick={() => requirePin(() => setClearHistoryConfirm(true))}>
                     <Trash2 size={14}/> Vider l'historique
                   </button>
                 )}
@@ -1551,6 +1765,13 @@ export default function App() {
               >
                 {exportingPdf ? <Loader2 size={15} style={{animation:"spin 1s linear infinite"}}/> : <FileText size={15}/>} Exporter PDF
               </button>
+              <button
+                style={{display:"flex", alignItems:"center", gap:8, padding:"9px 18px", background:"white", color:C.primary, border:`1.5px solid ${C.primary}`, borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap"}}
+                onClick={exportSalesJournalCSV}
+                title="Exporte le journal local de toutes les ventes (fonctionne hors ligne)"
+              >
+                <Save size={15}/> Export secours (CSV)
+              </button>
             </div>
 
             {historyView === "liste" && (
@@ -1576,7 +1797,7 @@ export default function App() {
                     </div>
                     <div style={{display:"flex", alignItems:"center", gap:12}}>
                       <span style={{fontSize:isMobile?16:18, fontWeight:800, color:C.primaryDark}}>{formatPrice(tx.total)}</span>
-                      <button style={{...S.iconBtn("#CC3333"), border:"none"}} onClick={() => setDeleteTxConfirm(tx.id)}><Trash2 size={14}/></button>
+                      <button style={{...S.iconBtn("#CC3333"), border:"none"}} onClick={() => requirePin(() => setDeleteTxConfirm(tx.id))}><Trash2 size={14}/></button>
                     </div>
                   </div>
                   <div style={{fontSize:13, color:"#555", borderTop:"1px solid #F0F2F8", paddingTop:10, display:"flex", flexWrap:"wrap", gap:"4px 12px"}}>
@@ -1969,7 +2190,8 @@ export default function App() {
                       <select
                         style={{...S.select, width:140}}
                         value={tabletPrefixDraft}
-                        onChange={e => { setTabletPrefixDraft(e.target.value); savePrefix(e.target.value); }}
+                        disabled={checkingPrefix}
+                        onChange={e => changePrefix(e.target.value)}
                       >
                         {LETTERS.map(l => <option key={l} value={l}>{l}</option>)}
                       </select>
@@ -1984,6 +2206,19 @@ export default function App() {
                       <RotateCcw size={13}/> Réinitialiser le compteur
                     </button>
                   </div>
+                  {prefixCollision && (
+                    <div style={{margin:"0 20px 16px", background:"#FFF4E5", border:"1.5px solid #F5A623", borderRadius:10, padding:"12px 14px", fontSize:13, color:"#8A5A00", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap"}}>
+                      <span style={{flex:1, minWidth:220}}>
+                        ⚠️ La lettre {prefixCollision.letter} est déjà utilisée par la tablette « {prefixCollision.name} ». Choisissez une autre lettre.
+                      </span>
+                      <button
+                        style={{padding:"8px 14px", background:"white", color:"#8A5A00", border:"1.5px solid #F5A623", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap"}}
+                        onClick={() => forcePrefix(prefixCollision.letter)}
+                      >
+                        Utiliser quand même
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div style={S.card}>
