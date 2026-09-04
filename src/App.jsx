@@ -831,7 +831,7 @@ export default function App() {
   const cartTotal    = Math.round(cart.reduce((s,i) => s + Math.round(i.price*100) * i.qty, 0)) / 100;
   const change       = Math.round((amountGiven - cartTotal) * 100) / 100;
   const canEncaisser = cart.length > 0 && amountGiven >= cartTotal;
-  const quickAmounts = changeMode === "rendu" ? QUICK_AMOUNTS.filter(a => a >= 1) : QUICK_AMOUNTS;
+  const quickAmounts = changeMode === "rendu" ? QUICK_AMOUNTS.filter(a => a >= 0.5) : QUICK_AMOUNTS;
   const activeEvent  = activeEventId ? events.find(e => String(e.id) === String(activeEventId)) : null;
 
   useEffect(() => {
