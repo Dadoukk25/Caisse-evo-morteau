@@ -902,7 +902,7 @@ export default function App() {
     setDeleteTxConfirm(null); await loadTransactions();
   }
   async function clearAllHistory() {
-    const { error } = await supabase.from("transactions").delete().neq("id", 0);
+    const { error } = await supabase.from("transactions").delete().gt("created_at", "1970-01-01");
     if (error) { alert("Erreur : "+error.message); return; }
     setClearHistoryConfirm(false); await loadTransactions();
   }
