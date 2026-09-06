@@ -1121,6 +1121,24 @@ export default function App() {
   // Transactions filtrées (date + tablette) — partagées liste / par article / export PDF
   const filteredTx = transactions.filter(t => matchesDateFilter(t) && matchesTabletFilter(t));
 
+  const formatDayLabel = d0 => {
+    const label = new Date(d0).toLocaleDateString("fr-FR", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  };
+
+  // Transactions groupées par jour (le plus récent d'abord), avec total par jour — pour l'affichage Historique
+  const txByDay = (() => {
+    const map = new Map();
+    filteredTx.forEach((tx, i) => {
+      const key = dayKey(tx.created_at);
+      if (!map.has(key)) map.set(key, { key, label: formatDayLabel(tx.created_at), items: [], total: 0 });
+      const g = map.get(key);
+      g.items.push({ tx, i });
+      g.total += Number(tx.total);
+    });
+    return Array.from(map.values()).sort((a, b) => b.key.localeCompare(a.key));
+  })();
+
   // Stats du jour (filtrées par tablette uniquement)
   const txToday   = transactions.filter(t => new Date(t.created_at).toDateString() === today && matchesTabletFilter(t));
   const totalJour = txToday.reduce((s,t) => s+Number(t.total), 0);
@@ -1155,15 +1173,15 @@ export default function App() {
     cardTitle:   { fontWeight:700, fontSize:isMobile?14:15, color:C.primaryDark },
     catTabs:     { display:"flex", gap:isMobile?6:8, padding:isMobile?"10px 12px":"12px 20px", borderBottom:"1px solid #F0F2F8", flexWrap:"wrap" },
     catTab: a => ({ padding:isMobile?"9px 14px":isTablet?"8px 16px":"6px 16px", borderRadius:20, border:`1.5px solid ${a?C.primary:"#E0E4F0"}`, background:a?C.primary:"white", color:a?"white":"#555", fontSize:isMobile?14:13, fontWeight:a?600:400, cursor:"pointer" }),
-    productGrid: { display:"grid", gridTemplateColumns:isMobile?"repeat(3,1fr)":isTablet?"repeat(auto-fill,minmax(155px,1fr))":"repeat(auto-fill,minmax(140px,1fr))", gap:isMobile?10:12, padding:isMobile?12:20 },
-    productBtn:  { background:"white", border:"1.5px solid #E8EAF0", borderRadius:14, padding:isMobile?"14px 8px":isTablet?"18px 12px":"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:isMobile?6:8, transition:"all 0.12s" },
+    productGrid: { display:"grid", gridTemplateColumns:isMobile?"repeat(3,1fr)":isTablet?"repeat(3, 1fr)":"repeat(auto-fill,minmax(140px,1fr))", gap:isMobile?10:12, padding:isMobile?12:20 },
+    productBtn:  { background:"white", border:"1.5px solid #E8EAF0", borderRadius:14, padding:isMobile?"14px 8px":isTablet?"8px 6px":"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:isMobile?6:8, transition:"all 0.12s" },
     cartItems:   { padding:isMobile?"10px 12px":"12px 16px", maxHeight:isMobile?220:260, overflowY:"auto" },
     cartItem:    { display:"flex", alignItems:"center", gap:isMobile?8:10, padding:"10px 0", borderBottom:"1px solid #F4F6FB" },
     qtyBtn:      { width:qtySize, height:qtySize, borderRadius:8, border:`1.5px solid ${C.primary}`, background:"white", color:C.primary, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:isMobile?16:14 },
     totalSection:{ padding:isMobile?"12px 14px":"14px 16px", borderTop:"2px solid #F0F2F8", background:C.primaryLight },
     monnaieSection:{ padding:isMobile?"12px":"14px 16px" },
     quickGrid:   { display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:isMobile?10:8, marginBottom:12 },
-    quickBtn:    { padding:isMobile?"15px 6px":isTablet?"13px 6px":"10px 6px", background:"white", border:`1.5px solid ${C.primary}`, borderRadius:10, color:C.primary, fontWeight:700, fontSize:isMobile?16:isTablet?14:13, cursor:"pointer", textAlign:"center", transition:"all 0.12s" },
+    quickBtn:    { padding:isMobile?"15px 6px":isTablet?"8px 4px":"10px 6px", background:"white", border:`1.5px solid ${C.primary}`, borderRadius:10, color:C.primary, fontWeight:700, fontSize:isMobile?16:isTablet?14:13, cursor:"pointer", textAlign:"center", transition:"all 0.12s" },
     changeDisplay: ok => ({ background:ok?"#EDFBF0":"#FFF0F0", border:`1.5px solid ${ok?"#5CB872":"#E55"}`, borderRadius:10, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }),
     statsBar:    { background:C.primary, borderRadius:16, padding:isMobile?"16px":"24px 28px", marginBottom:20, color:"white", display:"flex", flexDirection:isMobile?"column":"row", alignItems:isMobile?"flex-start":"center", justifyContent:"space-between", gap:isMobile?16:0 },
     txCard:      { background:"white", borderRadius:14, border:"1px solid #E8EAF0", padding:isMobile?"12px 14px":"16px 20px", marginBottom:12 },
@@ -1472,9 +1490,9 @@ export default function App() {
                         onMouseEnter={e => { e.currentTarget.style.borderColor=C.primary; e.currentTarget.style.background=C.primaryLight; e.currentTarget.style.transform="translateY(-2px)"; }}
                         onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background="white"; e.currentTarget.style.transform="none"; }}
                       >
-                        <span style={{fontSize:emojiSize, lineHeight:1}}>{p.emoji}</span>
-                        <span style={{fontSize:isMobile?12:13, fontWeight:600, color:"#2a2a3e", lineHeight:1.3}}>{p.name}</span>
-                        <span style={{fontSize:isMobile?13:14, fontWeight:700, color:C.primary}}>{formatPrice(p.price)}</span>
+                        <span style={{fontSize:isTablet?32:emojiSize, lineHeight:1}}>{p.emoji}</span>
+                        <span style={{fontSize:isMobile?12:isTablet?11:13, fontWeight:600, color:"#2a2a3e", lineHeight:1.3}}>{p.name}</span>
+                        <span style={{fontSize:isMobile?13:isTablet?13:14, fontWeight:700, color:C.primary}}>{formatPrice(p.price)}</span>
                       </button>
                     ))}
                   </div>
@@ -1623,19 +1641,21 @@ export default function App() {
                                   </button>
                                 ))}
                               </div>
-                              <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
-                                <div style={{flex:1, background:"#F4F6FB", borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-                                  <span style={{fontSize:13, color:"#666"}}>Reçu</span>
-                                  <span style={{fontSize:20, fontWeight:800, color:"#333"}}>{formatPrice(amountGiven)}</span>
+                              <div style={{display:"flex", flexDirection:isTablet?"row":"column", justifyContent:isTablet?"space-between":undefined, gap:10}}>
+                                <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:isTablet?0:10, flex:1}}>
+                                  <div style={{flex:1, background:"#F4F6FB", borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                                    <span style={{fontSize:13, color:"#666"}}>Reçu</span>
+                                    <span style={{fontSize:20, fontWeight:800, color:"#333"}}>{formatPrice(amountGiven)}</span>
+                                  </div>
+                                  <button style={{border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600"}} onClick={() => setAmountGiven(0)}>✕ Effacer</button>
                                 </div>
-                                <button style={{border:"1.5px solid #CC660030", background:"#FFF5E6", padding:"10px 14px", borderRadius:10, fontSize:12, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", color:"#CC6600"}} onClick={() => setAmountGiven(0)}>✕ Effacer</button>
+                                {amountGiven > 0 && (
+                                  <div style={{...S.changeDisplay(change>=0), flex:isTablet?1:undefined, marginBottom:isTablet?0:8}}>
+                                    <span style={{fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828"}}>{change>=0?"Monnaie à rendre":"⚠️ Manque"}</span>
+                                    <span style={{fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828"}}>{formatPrice(Math.abs(change))}</span>
+                                  </div>
+                                )}
                               </div>
-                              {amountGiven > 0 && (
-                                <div style={S.changeDisplay(change>=0)}>
-                                  <span style={{fontSize:14, fontWeight:600, color:change>=0?"#2E7D32":"#C62828"}}>{change>=0?"Monnaie à rendre":"⚠️ Manque"}</span>
-                                  <span style={{fontSize:20, fontWeight:800, color:change>=0?"#2E7D32":"#C62828"}}>{formatPrice(Math.abs(change))}</span>
-                                </div>
-                              )}
                               <button
                                 style={{width:"100%", padding:isMobile?"18px":"16px", background:canEncaisser?C.accent:"#C8D0E8", color:canEncaisser?"#1a1000":"white", border:"none", borderRadius:12, fontSize:isMobile?18:17, fontWeight:800, cursor:canEncaisser?"pointer":"default", display:"flex", alignItems:"center", justifyContent:"center", gap:10}}
                                 onClick={goToConfirmation}
@@ -1782,32 +1802,43 @@ export default function App() {
                 <p style={{fontSize:16}}>{transactions.length === 0 ? "Aucune transaction pour l'instant" : "Aucune transaction pour ces filtres"}</p>
               </div>
             ) : (
-              filteredTx.map((tx, i) => (
-                <div key={tx.id} style={S.txCard}>
-                  <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
-                    <div style={{fontSize:isMobile?12:13, color:"#888", display:"flex", alignItems:"center", gap:5, flexWrap:"wrap"}}>
-                      <Clock size={14}/> {formatDate(tx.created_at)} {formatTime(tx.created_at)}
-                      <span style={{marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666"}}>#{filteredTx.length-i}</span>
-                      {tx.order_number && (
-                        <span style={{background:C.primaryLight, color:C.primary, padding:"2px 10px", borderRadius:20, fontSize:12, fontWeight:700}}>{tx.order_number}</span>
-                      )}
-                      <span title={tx.payment_method === "cb" ? "Payé par CB" : "Payé en espèces"} style={{fontSize:14}}>
-                        {tx.payment_method === "cb" ? "💳" : "💵"}
-                      </span>
-                    </div>
-                    <div style={{display:"flex", alignItems:"center", gap:12}}>
-                      <span style={{fontSize:isMobile?16:18, fontWeight:800, color:C.primaryDark}}>{formatPrice(tx.total)}</span>
-                      <button style={{...S.iconBtn("#CC3333"), border:"none"}} onClick={() => requirePin(() => setDeleteTxConfirm(tx.id))}><Trash2 size={14}/></button>
+              txByDay.map(group => (
+                <div key={group.key}>
+                  <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8, background:C.primaryLight, color:C.primary, padding:"8px 14px", borderRadius:8, marginBottom:10, marginTop:10}}>
+                    <span style={{fontSize:13, fontWeight:700}}>{group.label}</span>
+                    <div style={{display:"flex", alignItems:"center", gap:14}}>
+                      <span style={{fontSize:12, opacity:0.85}}>{group.items.length} transaction{group.items.length>1?"s":""}</span>
+                      <span style={{fontSize:14, fontWeight:800}}>{formatPrice(group.total)}</span>
                     </div>
                   </div>
-                  <div style={{fontSize:13, color:"#555", borderTop:"1px solid #F0F2F8", paddingTop:10, display:"flex", flexWrap:"wrap", gap:"4px 12px"}}>
-                    {(tx.items||[]).map((item,j) => <span key={j}>{item.emoji} {item.name} ×{item.qty}</span>)}
-                  </div>
-                  <div style={{marginTop:10, display:"flex", gap:16, fontSize:12, color:"#888", flexWrap:"wrap"}}>
-                    <span>Mode : <strong style={{color:"#333"}}>{tx.payment_method === "cb" ? "CB 💳" : "Espèces 💵"}</strong></span>
-                    <span>Reçu : <strong style={{color:"#333"}}>{formatPrice(tx.given)}</strong></span>
-                    <span>Monnaie rendue : <strong style={{color:"#333"}}>{formatPrice(tx.change)}</strong></span>
-                  </div>
+                  {group.items.map(({tx, i}) => (
+                    <div key={tx.id} style={S.txCard}>
+                      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
+                        <div style={{fontSize:isMobile?12:13, color:"#888", display:"flex", alignItems:"center", gap:5, flexWrap:"wrap"}}>
+                          <Clock size={14}/> {formatDate(tx.created_at)} {formatTime(tx.created_at)}
+                          <span style={{marginLeft:8, background:"#F0F2F8", padding:"2px 10px", borderRadius:20, fontSize:12, color:"#666"}}>#{filteredTx.length-i}</span>
+                          {tx.order_number && (
+                            <span style={{background:C.primaryLight, color:C.primary, padding:"2px 10px", borderRadius:20, fontSize:12, fontWeight:700}}>{tx.order_number}</span>
+                          )}
+                          <span title={tx.payment_method === "cb" ? "Payé par CB" : "Payé en espèces"} style={{fontSize:14}}>
+                            {tx.payment_method === "cb" ? "💳" : "💵"}
+                          </span>
+                        </div>
+                        <div style={{display:"flex", alignItems:"center", gap:12}}>
+                          <span style={{fontSize:isMobile?16:18, fontWeight:800, color:C.primaryDark}}>{formatPrice(tx.total)}</span>
+                          <button style={{...S.iconBtn("#CC3333"), border:"none"}} onClick={() => requirePin(() => setDeleteTxConfirm(tx.id))}><Trash2 size={14}/></button>
+                        </div>
+                      </div>
+                      <div style={{fontSize:13, color:"#555", borderTop:"1px solid #F0F2F8", paddingTop:10, display:"flex", flexWrap:"wrap", gap:"4px 12px"}}>
+                        {(tx.items||[]).map((item,j) => <span key={j}>{item.emoji} {item.name} ×{item.qty}</span>)}
+                      </div>
+                      <div style={{marginTop:10, display:"flex", gap:16, fontSize:12, color:"#888", flexWrap:"wrap"}}>
+                        <span>Mode : <strong style={{color:"#333"}}>{tx.payment_method === "cb" ? "CB 💳" : "Espèces 💵"}</strong></span>
+                        <span>Reçu : <strong style={{color:"#333"}}>{formatPrice(tx.given)}</strong></span>
+                        <span>Monnaie rendue : <strong style={{color:"#333"}}>{formatPrice(tx.change)}</strong></span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ))
             )}
