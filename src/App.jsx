@@ -477,6 +477,7 @@ export default function App() {
   const [tablets, setTablets]                 = useState([]);
 
   const [tabletPrefix, setTabletPrefix]           = useState(() => localStorage.getItem("tablet_prefix") || "A");
+  const [manualTxTablet, setManualTxTablet]       = useState(tabletPrefix);
   const [tabletPrefixDraft, setTabletPrefixDraft] = useState(() => localStorage.getItem("tablet_prefix") || "A");
   const [prefixCollision, setPrefixCollision]     = useState(null); // { letter, name } d'une autre tablette
   const [checkingPrefix, setCheckingPrefix]       = useState(false);
@@ -640,7 +641,7 @@ export default function App() {
     const { error } = await supabase.from("transactions").insert([{
       items: parsedItems, total, given: total, change: 0,
       payment_method: manualTxPayment,
-      order_number: `${tabletPrefix}M${Date.now()}`,
+      order_number: `${manualTxTablet}M${Date.now()}`,
       created_at: new Date(manualTxDate).toISOString(),
     }]);
     if (error) { alert("Erreur : " + error.message); setSavingManualTx(false); return; }
@@ -1064,6 +1065,29 @@ export default function App() {
         ],
         theme: "grid",
         headStyles: { fillColor: [0, 59, 142] },
+      });
+
+      // ── Synthèse financière finale ──
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 6,
+        head: [["Synthese financiere finale", ""]],
+        body: [
+          ["CA total encaisse", eur(caTotal)],
+          ["Dont especes", eur(totalEspeces)],
+          ["Dont CB (brut)", eur(fees.totalCB)],
+          ["Frais SumUp CB (par transaction)", "- " + eur(fees.feesPerTx)],
+          ["CA NET REEL", eur(Math.round((caTotal - fees.feesPerTx) * 100) / 100)],
+        ],
+        theme: "grid",
+        headStyles: { fillColor: [0, 59, 142] },
+        bodyStyles: { fontSize: 10 },
+        didParseCell: function(data) {
+          if (data.row.index === 4) {
+            data.cell.styles.fontStyle = "bold";
+            data.cell.styles.fontSize = 12;
+            data.cell.styles.fillColor = [230, 240, 255];
+          }
+        },
       });
 
       // ── CA par catégorie ──
@@ -1835,7 +1859,7 @@ export default function App() {
                   <div style={{fontSize:22, fontWeight:800, color:C.accent}}>{txToday.length>0?formatPrice(totalJour/txToday.length):"–"}</div>
                 </div>
                 <button style={{display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer"}}
-                  onClick={() => requirePin(() => setShowManualTx(true))}>
+                  onClick={() => requirePin(() => { loadTablets(); setShowManualTx(true); })}>
                   <Plus size={14}/> Ajouter une transaction
                 </button>
                 {transactions.length > 0 && (
@@ -1864,23 +1888,21 @@ export default function App() {
                 <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Articles</label>
                 {manualTxItems.map((item, idx) => (
                   <div key={idx} style={{display:"flex", gap:8, marginBottom:8, alignItems:"center", flexWrap:"wrap"}}>
-                    <input
-                      style={{...S.input, width:56, textAlign:"center", flex:"0 0 auto"}}
-                      value={item.emoji}
-                      onChange={e => setManualTxItems(items => items.map((it,i) => i===idx ? {...it, emoji:e.target.value} : it))}
-                    />
-                    <input
-                      style={{...S.input, flex:"2 1 140px"}}
-                      placeholder="Nom de l'article"
-                      value={item.name}
-                      onChange={e => setManualTxItems(items => items.map((it,i) => i===idx ? {...it, name:e.target.value} : it))}
-                    />
-                    <input
-                      style={{...S.input, flex:"1 1 90px"}}
-                      type="number" step="0.01" min="0" placeholder="Prix"
-                      value={item.price}
-                      onChange={e => setManualTxItems(items => items.map((it,i) => i===idx ? {...it, price:e.target.value} : it))}
-                    />
+                    <select
+                      style={{...S.input, flex:"2 1 220px"}}
+                      value={item.productId || ""}
+                      onChange={e => {
+                        const p = products.find(pp => String(pp.id) === e.target.value);
+                        setManualTxItems(items => items.map((it,i) => i===idx
+                          ? (p ? { ...it, productId:p.id, name:p.name, emoji:p.emoji, price:String(p.price) } : { ...it, productId:"" })
+                          : it));
+                      }}
+                    >
+                      <option value="" disabled>-- Choisir un produit --</option>
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>{p.emoji} {p.name} — {p.price}€</option>
+                      ))}
+                    </select>
                     <input
                       style={{...S.input, flex:"0 0 70px"}}
                       type="number" min="1" placeholder="Qté"
@@ -1895,10 +1917,24 @@ export default function App() {
                 ))}
                 <button
                   style={{display:"flex", alignItems:"center", gap:6, padding:"8px 14px", background:"white", border:`1.5px solid ${C.primary}`, color:C.primary, borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:16}}
-                  onClick={() => setManualTxItems(items => [...items, { name:"", emoji:"🛒", price:"", qty:1 }])}
+                  onClick={() => setManualTxItems(items => [...items, products[0]
+                    ? { productId:products[0].id, name:products[0].name, emoji:products[0].emoji, price:String(products[0].price), qty:1 }
+                    : { productId:"", name:"", emoji:"🛒", price:"", qty:1 }])}
                 >
                   <Plus size={14}/> Ajouter une ligne
                 </button>
+
+                <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Tablette</label>
+                <select
+                  style={{...S.input, marginBottom:16, maxWidth:220}}
+                  value={manualTxTablet}
+                  onChange={e => setManualTxTablet(e.target.value)}
+                >
+                  {tablets.map(t => (
+                    <option key={t.id} value={t.order_prefix || t.name}>{t.name}{t.order_prefix ? ` (${t.order_prefix})` : ""}</option>
+                  ))}
+                  <option value="Autre">Autre</option>
+                </select>
 
                 <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Mode de paiement</label>
                 <div style={{display:"flex", gap:10, marginBottom:20}}>
