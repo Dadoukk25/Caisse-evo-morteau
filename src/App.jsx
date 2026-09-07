@@ -11,7 +11,6 @@ import {
 const PIN_CODE = "2550";
 const PIN_STORAGE_KEY = "pin_unlocked_until";
 const PIN_DURATION_MS = 2 * 60 * 60 * 1000; // 2 heures
-const SUMUP_COMMISSION = 0.0175; // 1,75 %
 
 function isPinUnlocked() {
   const until = parseInt(localStorage.getItem(PIN_STORAGE_KEY), 10);
@@ -469,6 +468,7 @@ export default function App() {
 
   const [colors, setColors]           = useState({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background, card:DEFAULTS.card });
   const [emojiSize, setEmojiSize]     = useState(EMOJI_SIZE_DEFAULT);
+  const [sumupRate, setSumupRate]     = useState(0.0175);
   const [savingColors, setSavingColors] = useState(false);
 
   const [tabletName, setTabletName]           = useState(() => localStorage.getItem("tablet_name") || "");
@@ -532,6 +532,12 @@ export default function App() {
     Promise.all([loadProducts(), loadTransactions(), loadCategories(), loadColors(), loadEvents(), loadEventProducts()])
       .finally(() => setLoading(false));
   }, []);
+
+  // TODO: retirer ce log de vérification une fois la commission SumUp validée sur les vraies données
+  useEffect(() => {
+    if (transactions.length === 0) return;
+    console.log("[SumUp check]", calculateSumUpFees(transactions, sumupRate));
+  }, [transactions, sumupRate]);
 
   useEffect(() => {
     const ch = supabase.channel("tx-changes")
@@ -668,6 +674,8 @@ export default function App() {
     });
     const es = parseInt(map["emoji_size"], 10);
     setEmojiSize(EMOJI_SIZE_OPTIONS.some(o => o.value === es) ? es : EMOJI_SIZE_DEFAULT);
+    const rate = parseFloat(map["sumup_rate"]);
+    setSumupRate(Number.isFinite(rate) && rate > 0 ? rate : 0.0175);
   }
   async function saveColors() {
     setSavingColors(true);
@@ -677,6 +685,7 @@ export default function App() {
       supabase.from("settings").upsert({ key:"color_background", value:colors.background }, { onConflict:"key" }),
       supabase.from("settings").upsert({ key:"color_card",       value:colors.card       }, { onConflict:"key" }),
       supabase.from("settings").upsert({ key:"emoji_size",       value:String(emojiSize) }, { onConflict:"key" }),
+      supabase.from("settings").upsert({ key:"sumup_rate",       value:String(sumupRate) }, { onConflict:"key" }),
     ]);
     setSavingColors(false);
   }
@@ -976,6 +985,25 @@ export default function App() {
     setClearHistoryConfirm(false); await loadTransactions();
   }
 
+  function calculateSumUpFees(transactions, rate) {
+    const cbTx = transactions.filter(t => t.payment_method === "cb");
+    const totalCB = cbTx.reduce((s, t) => s + Number(t.total), 0);
+    // Méthode par transaction (réelle SumUp)
+    const feesPerTx = cbTx.reduce((s, t) => s + Math.round(Number(t.total) * rate * 100) / 100, 0);
+    const feesPerTxRounded = Math.round(feesPerTx * 100) / 100;
+    // Méthode globale (ancienne méthode)
+    const feesGlobal = Math.round(totalCB * rate * 100) / 100;
+    // Écart
+    const gap = Math.round((feesPerTxRounded - feesGlobal) * 100) / 100;
+    return {
+      totalCB,
+      feesPerTx: feesPerTxRounded,
+      feesGlobal,
+      gap,
+      netCB: Math.round((totalCB - feesPerTxRounded) * 100) / 100,
+    };
+  }
+
   async function exportHistoriquePDF() {
     setExportingPdf(true);
     try {
@@ -1002,8 +1030,8 @@ export default function App() {
       const nbTx         = rows.length;
       const totalCB      = rows.filter(t => t.payment_method === "cb").reduce((s, t) => s + Number(t.total), 0);
       const totalEspeces = rows.filter(t => t.payment_method !== "cb").reduce((s, t) => s + Number(t.total), 0);
-      const commission   = Math.round(totalCB * SUMUP_COMMISSION * 100) / 100;
-      const netCB        = Math.round((totalCB - commission) * 100) / 100;
+      const fees = calculateSumUpFees(rows, sumupRate);
+      const { feesPerTx, feesGlobal, gap, netCB } = fees;
 
       // ── En-tête ──
       doc.setFontSize(18); doc.setFont(undefined, "bold");
@@ -1033,8 +1061,11 @@ export default function App() {
         startY: doc.lastAutoTable.finalY + 6,
         head: [["SumUp (CB)", ""]],
         body: [
-          ["Montant total CB", eur(totalCB)],
-          ["Commission SumUp (1,75%)", "- " + eur(commission)],
+          ["Montant total CB", eur(fees.totalCB)],
+          ["Taux commission", (sumupRate * 100).toFixed(2) + " %"],
+          ["Commission (calcul par transaction)", "- " + eur(feesPerTx)],
+          ["Commission (calcul global — indicatif)", "- " + eur(feesGlobal)],
+          ["Ecart arrondi (reel - global)", gap >= 0 ? "+ " + eur(gap) : "- " + eur(Math.abs(gap))],
           ["Net CB apres commission", eur(netCB)],
         ],
         theme: "grid",
@@ -2191,6 +2222,14 @@ export default function App() {
                         );
                       })}
                     </div>
+                  </div>
+                  <div style={{margin:"0 20px 20px", padding:16, background:C.background, borderRadius:12, border:"1px solid #E8EAF0"}}>
+                    <label style={{fontSize:13, fontWeight:600, color:"#444", display:"block", marginBottom:4}}>Taux de commission SumUp (%)</label>
+                    <p style={{fontSize:12, color:"#999", margin:"0 0 10px"}}>Par défaut 1,75 %. Modifiable selon votre contrat SumUp.</p>
+                    <input type="number" step="0.01" min="0" max="5" style={{...S.input, maxWidth:140}}
+                      value={sumupRate * 100}
+                      onChange={e => setSumupRate(parseFloat(e.target.value) / 100)}
+                    />
                   </div>
                   <div style={{margin:"0 20px 20px", padding:16, background:C.background, borderRadius:12, border:"1px solid #E8EAF0"}}>
                     <div style={{fontSize:12, color:"#888", fontWeight:600, marginBottom:10, textTransform:"uppercase", letterSpacing:"0.06em"}}>Aperçu</div>
