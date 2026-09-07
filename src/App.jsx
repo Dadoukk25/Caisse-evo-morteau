@@ -58,7 +58,7 @@ function txTabletPrefix(tx) {
   return n ? n[0].toUpperCase() : "?";
 }
 
-const DEFAULTS = { primary:"#003B8E", accent:"#F5A623", background:"#F4F6FB" };
+const DEFAULTS = { primary:"#003B8E", accent:"#F5A623", background:"#F4F6FB", card:"#F5F0E8" };
 const EMOJI_SIZE_DEFAULT = 72;
 const EMOJI_SIZE_OPTIONS = [
   { label:"Petit",      value:40  },
@@ -146,7 +146,7 @@ function DeviceSelector({ onSelect }) {
   );
 }
 
-function ModeSelector({ onSelect }) {
+function ModeSelector({ onSelect, useOrderNumber, onToggleOrderNumber }) {
   const [hovered, setHovered] = useState(null);
   const MODES = [
     { key:"rendu",     label:"Je rends la monnaie",      sublabel:"Calculette avec rendu de monnaie",     icon:"💶" },
@@ -191,6 +191,36 @@ function ModeSelector({ onSelect }) {
             </div>
           </button>
         ))}
+      </div>
+
+      <div style={{ marginTop:40, textAlign:"center" }}>
+        <div style={{ fontSize:12, fontWeight:700, color:"#999", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:14 }}>
+          Numéro de commande
+        </div>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:12 }}>
+          <button
+            onClick={onToggleOrderNumber}
+            style={{
+              width:52, height:30, borderRadius:20, cursor:"pointer",
+              border: useOrderNumber ? "none" : "1.5px solid #D0D6E8",
+              background: useOrderNumber ? DEFAULTS.primary : "white",
+              position:"relative", transition:"all 0.15s", flexShrink:0, padding:0,
+            }}
+          >
+            <span style={{
+              position:"absolute", top:3, left: useOrderNumber ? 25 : 3,
+              width:24, height:24, borderRadius:"50%",
+              background: useOrderNumber ? "white" : "#C8D0E8",
+              transition:"all 0.15s",
+            }}/>
+          </button>
+          <span style={{ fontSize:15, fontWeight:600, color:"#1a1a2e" }}>
+            Générer un numéro de commande (ex : A1, A2…)
+          </span>
+        </div>
+        <p style={{ margin:"10px 0 0", color:"#888", fontSize:13 }}>
+          Désactivez si vous n'avez pas besoin de numéroter les commandes
+        </p>
       </div>
     </div>
   );
@@ -417,16 +447,27 @@ export default function App() {
   const [tabletFilter, setTabletFilter]                = useState("tout"); // "tout" | lettre de préfixe
   const [exportingPdf, setExportingPdf]               = useState(false);
 
+  const [showManualTx, setShowManualTx]         = useState(false);
+  const [manualTxDate, setManualTxDate]         = useState("");
+  const [manualTxItems, setManualTxItems]       = useState([{ name:"", emoji:"🛒", price:"", qty:1 }]);
+  const [manualTxPayment, setManualTxPayment]   = useState("especes");
+  const [savingManualTx, setSavingManualTx]     = useState(false);
+
   const [pinModalOpen, setPinModalOpen]              = useState(false);
   const [pinPendingAction, setPinPendingAction]      = useState(null);
   const [showPendingModal, setShowPendingModal]      = useState(false);
   const [paymentMethod, setPaymentMethod]           = useState("especes"); // "especes" | "cb"
 
+  const [useOrderNumber, setUseOrderNumber] = useState(() => {
+    const v = localStorage.getItem("use_order_number");
+    return v === null ? true : v === "true";
+  });
+
   const [newCatName, setNewCatName]              = useState("");
   const [deleteCatConfirm, setDeleteCatConfirm]  = useState(null);
   const [savingCat, setSavingCat]                = useState(false);
 
-  const [colors, setColors]           = useState({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background });
+  const [colors, setColors]           = useState({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background, card:DEFAULTS.card });
   const [emojiSize, setEmojiSize]     = useState(EMOJI_SIZE_DEFAULT);
   const [savingColors, setSavingColors] = useState(false);
 
@@ -484,6 +525,7 @@ export default function App() {
     primaryLight: lighten(colors.primary, 0.9),
     accent:       colors.accent,
     background:   colors.background,
+    card:         colors.card,
   };
 
   useEffect(() => {
@@ -522,7 +564,11 @@ export default function App() {
   useEffect(() => {
     if (tab !== "parametres") return;
     const check = () => {
-      if (!isPinUnlocked()) { setTab("caisse"); setPinModalOpen(true); }
+      if (!isPinUnlocked()) {
+        setTab("caisse");
+        setPinModalOpen(true);
+        alert("Session expirée. Veuillez saisir le PIN pour accéder aux paramètres.");
+      }
     };
     check();
     const id = setInterval(check, 30000);
@@ -584,6 +630,26 @@ export default function App() {
     if (error) { setDbError(true); return; }
     setTransactions(data);
   }
+
+  async function addManualTransaction() {
+    const items = manualTxItems.filter(i => i.name && parseFloat(i.price) > 0);
+    if (!items.length || !manualTxDate) return;
+    const parsedItems = items.map(i => ({ name:i.name, emoji:i.emoji, price:parseFloat(i.price), qty:i.qty }));
+    const total = Math.round(parsedItems.reduce((s,i) => s + i.price * i.qty, 0) * 100) / 100;
+    setSavingManualTx(true);
+    const { error } = await supabase.from("transactions").insert([{
+      items: parsedItems, total, given: total, change: 0,
+      payment_method: manualTxPayment,
+      order_number: `${tabletPrefix}M${Date.now()}`,
+      created_at: new Date(manualTxDate).toISOString(),
+    }]);
+    if (error) { alert("Erreur : " + error.message); setSavingManualTx(false); return; }
+    setShowManualTx(false);
+    setManualTxItems([{ name:"", emoji:"🛒", price:"", qty:1 }]);
+    setManualTxDate("");
+    setSavingManualTx(false);
+    await loadTransactions();
+  }
   async function loadCategories() {
     const { data, error } = await supabase.from("categories").select("*").order("name");
     if (error) { setDbError(true); return; }
@@ -598,6 +664,7 @@ export default function App() {
       primary:    map["color_primary"]    || DEFAULTS.primary,
       accent:     map["color_accent"]     || DEFAULTS.accent,
       background: map["color_background"] || DEFAULTS.background,
+      card:       map["color_card"]       || DEFAULTS.card,
     });
     const es = parseInt(map["emoji_size"], 10);
     setEmojiSize(EMOJI_SIZE_OPTIONS.some(o => o.value === es) ? es : EMOJI_SIZE_DEFAULT);
@@ -608,11 +675,12 @@ export default function App() {
       supabase.from("settings").upsert({ key:"color_primary",    value:colors.primary    }, { onConflict:"key" }),
       supabase.from("settings").upsert({ key:"color_accent",     value:colors.accent     }, { onConflict:"key" }),
       supabase.from("settings").upsert({ key:"color_background", value:colors.background }, { onConflict:"key" }),
+      supabase.from("settings").upsert({ key:"color_card",       value:colors.card       }, { onConflict:"key" }),
       supabase.from("settings").upsert({ key:"emoji_size",       value:String(emojiSize) }, { onConflict:"key" }),
     ]);
     setSavingColors(false);
   }
-  function resetColors() { setColors({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background }); setEmojiSize(EMOJI_SIZE_DEFAULT); }
+  function resetColors() { setColors({ primary:DEFAULTS.primary, accent:DEFAULTS.accent, background:DEFAULTS.background, card:DEFAULTS.card }); setEmojiSize(EMOJI_SIZE_DEFAULT); }
 
   async function pingTablet(name, pendingCount) {
     if (!name) return;
@@ -708,6 +776,7 @@ export default function App() {
     const next = orderCounter + 1;
     localStorage.setItem("order_counter", String(next));
     setOrderCounter(next);
+    if (!useOrderNumber) return "";
     return `${tabletPrefix}${next}`;
   }
 
@@ -1174,7 +1243,7 @@ export default function App() {
     catTabs:     { display:"flex", gap:isMobile?6:8, padding:isMobile?"10px 12px":"12px 20px", borderBottom:"1px solid #F0F2F8", flexWrap:"wrap" },
     catTab: a => ({ padding:isMobile?"9px 14px":isTablet?"8px 16px":"6px 16px", borderRadius:20, border:`1.5px solid ${a?C.primary:"#E0E4F0"}`, background:a?C.primary:"white", color:a?"white":"#555", fontSize:isMobile?14:13, fontWeight:a?600:400, cursor:"pointer" }),
     productGrid: { display:"grid", gridTemplateColumns:isMobile?"repeat(3,1fr)":isTablet?"repeat(3, 1fr)":"repeat(auto-fill,minmax(140px,1fr))", gap:isMobile?10:12, padding:isMobile?12:20 },
-    productBtn:  { background:"white", border:"1.5px solid #E8EAF0", borderRadius:14, padding:isMobile?"14px 8px":isTablet?"8px 6px":"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:isMobile?6:8, transition:"all 0.12s" },
+    productBtn:  { background:C.card, border:"1.5px solid #E8EAF0", borderRadius:14, padding:isMobile?"14px 8px":isTablet?"8px 6px":"16px 10px", cursor:"pointer", textAlign:"center", display:"flex", flexDirection:"column", alignItems:"center", gap:isMobile?6:8, transition:"all 0.12s" },
     cartItems:   { padding:isMobile?"10px 12px":"12px 16px", maxHeight:isMobile?220:260, overflowY:"auto" },
     cartItem:    { display:"flex", alignItems:"center", gap:isMobile?8:10, padding:"10px 0", borderBottom:"1px solid #F4F6FB" },
     qtyBtn:      { width:qtySize, height:qtySize, borderRadius:8, border:`1.5px solid ${C.primary}`, background:"white", color:C.primary, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:isMobile?16:14 },
@@ -1214,7 +1283,17 @@ export default function App() {
   );
 
   if (!eventStepDone) return <EventSelector events={events} activeEventId={activeEventId} onSelect={selectEvent} />;
-  if (!changeMode) return <ModeSelector onSelect={setChangeMode} />;
+  if (!changeMode) return (
+    <ModeSelector
+      onSelect={setChangeMode}
+      useOrderNumber={useOrderNumber}
+      onToggleOrderNumber={() => {
+        const next = !useOrderNumber;
+        setUseOrderNumber(next);
+        localStorage.setItem("use_order_number", String(next));
+      }}
+    />
+  );
 
   const currentDevice = DEVICES.find(d => d.key === device);
   const DeviceIcon = currentDevice?.Icon;
@@ -1488,7 +1567,7 @@ export default function App() {
                     {filtered.map(p => (
                       <button key={p.id} style={S.productBtn} onClick={() => addToCart(p)}
                         onMouseEnter={e => { e.currentTarget.style.borderColor=C.primary; e.currentTarget.style.background=C.primaryLight; e.currentTarget.style.transform="translateY(-2px)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background="white"; e.currentTarget.style.transform="none"; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor="#E8EAF0"; e.currentTarget.style.background=C.card; e.currentTarget.style.transform="none"; }}
                       >
                         <span style={{fontSize:isTablet?32:emojiSize, lineHeight:1}}>{p.emoji}</span>
                         <span style={{fontSize:isMobile?12:isTablet?11:13, fontWeight:600, color:"#2a2a3e", lineHeight:1.3}}>{p.name}</span>
@@ -1730,6 +1809,10 @@ export default function App() {
                   <div style={{fontSize:12, opacity:0.75, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6}}>Panier moyen</div>
                   <div style={{fontSize:22, fontWeight:800, color:C.accent}}>{txToday.length>0?formatPrice(totalJour/txToday.length):"–"}</div>
                 </div>
+                <button style={{display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer"}}
+                  onClick={() => requirePin(() => setShowManualTx(true))}>
+                  <Plus size={14}/> Ajouter une transaction
+                </button>
                 {transactions.length > 0 && (
                   <button style={{display:"flex", alignItems:"center", gap:8, padding:"10px 16px", background:"rgba(255,255,255,0.15)", color:"white", border:"1.5px solid rgba(255,255,255,0.3)", borderRadius:10, fontSize:13, fontWeight:600, cursor:"pointer"}}
                     onClick={() => requirePin(() => setClearHistoryConfirm(true))}>
@@ -1738,6 +1821,86 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {showManualTx && (
+              <div style={{...S.card, padding:20, marginBottom:20}}>
+                <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16}}>
+                  <span style={{fontSize:16, fontWeight:700, color:"#2a2a3e"}}>Ajouter une transaction manuelle</span>
+                </div>
+
+                <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Date et heure</label>
+                <input
+                  type="datetime-local"
+                  style={{...S.input, marginBottom:16, maxWidth:280}}
+                  value={manualTxDate}
+                  onChange={e => setManualTxDate(e.target.value)}
+                />
+
+                <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Articles</label>
+                {manualTxItems.map((item, idx) => (
+                  <div key={idx} style={{display:"flex", gap:8, marginBottom:8, alignItems:"center", flexWrap:"wrap"}}>
+                    <input
+                      style={{...S.input, width:56, textAlign:"center", flex:"0 0 auto"}}
+                      value={item.emoji}
+                      onChange={e => setManualTxItems(items => items.map((it,i) => i===idx ? {...it, emoji:e.target.value} : it))}
+                    />
+                    <input
+                      style={{...S.input, flex:"2 1 140px"}}
+                      placeholder="Nom de l'article"
+                      value={item.name}
+                      onChange={e => setManualTxItems(items => items.map((it,i) => i===idx ? {...it, name:e.target.value} : it))}
+                    />
+                    <input
+                      style={{...S.input, flex:"1 1 90px"}}
+                      type="number" step="0.01" min="0" placeholder="Prix"
+                      value={item.price}
+                      onChange={e => setManualTxItems(items => items.map((it,i) => i===idx ? {...it, price:e.target.value} : it))}
+                    />
+                    <input
+                      style={{...S.input, flex:"0 0 70px"}}
+                      type="number" min="1" placeholder="Qté"
+                      value={item.qty}
+                      onChange={e => setManualTxItems(items => items.map((it,i) => i===idx ? {...it, qty:parseInt(e.target.value,10)||1} : it))}
+                    />
+                    <button
+                      style={{...S.iconBtn("#CC3333"), border:"none"}}
+                      onClick={() => setManualTxItems(items => items.length>1 ? items.filter((_,i) => i!==idx) : items)}
+                    ><Trash2 size={14}/></button>
+                  </div>
+                ))}
+                <button
+                  style={{display:"flex", alignItems:"center", gap:6, padding:"8px 14px", background:"white", border:`1.5px solid ${C.primary}`, color:C.primary, borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:16}}
+                  onClick={() => setManualTxItems(items => [...items, { name:"", emoji:"🛒", price:"", qty:1 }])}
+                >
+                  <Plus size={14}/> Ajouter une ligne
+                </button>
+
+                <label style={{fontSize:12, color:"#666", fontWeight:600, display:"block", marginBottom:6}}>Mode de paiement</label>
+                <div style={{display:"flex", gap:10, marginBottom:20}}>
+                  <button
+                    style={{padding:"9px 18px", borderRadius:8, border:`1.5px solid ${C.primary}`, background:manualTxPayment==="especes"?C.primary:"white", color:manualTxPayment==="especes"?"white":C.primary, fontSize:13, fontWeight:600, cursor:"pointer"}}
+                    onClick={() => setManualTxPayment("especes")}
+                  >💵 Espèces</button>
+                  <button
+                    style={{padding:"9px 18px", borderRadius:8, border:`1.5px solid ${C.primary}`, background:manualTxPayment==="cb"?C.primary:"white", color:manualTxPayment==="cb"?"white":C.primary, fontSize:13, fontWeight:600, cursor:"pointer"}}
+                    onClick={() => setManualTxPayment("cb")}
+                  >💳 CB</button>
+                </div>
+
+                <div style={{display:"flex", gap:12}}>
+                  <button
+                    style={{padding:"10px 24px", background:C.primary, color:"white", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:savingManualTx?"default":"pointer", opacity:savingManualTx?0.7:1}}
+                    onClick={addManualTransaction}
+                    disabled={savingManualTx}
+                  >{savingManualTx ? "Enregistrement…" : "Enregistrer"}</button>
+                  <button
+                    style={{padding:"10px 24px", background:"white", color:"#666", border:"1.5px solid #D0D6E8", borderRadius:8, fontSize:14, cursor:"pointer"}}
+                    onClick={() => { setShowManualTx(false); setManualTxItems([{ name:"", emoji:"🛒", price:"", qty:1 }]); setManualTxDate(""); }}
+                  >Annuler</button>
+                </div>
+              </div>
+            )}
+
             {/* Sous-onglets Historique : Liste / Par article */}
             <div style={S.subTabBar}>
               {[
@@ -1990,6 +2153,7 @@ export default function App() {
                       {label:"Couleur principale", key:"primary",    hint:"Header, boutons, onglets"},
                       {label:"Couleur accent",     key:"accent",     hint:"Bouton valider, stats CA"},
                       {label:"Couleur de fond",    key:"background", hint:"Arrière-plan de l'app"},
+                      {label:"Fond des articles",  key:"card",       hint:"Couleur de fond des cartes articles en caisse"},
                     ].map(item => (
                       <div key={item.key}>
                         <label style={{fontSize:13, fontWeight:600, color:"#444", display:"block", marginBottom:4}}>{item.label}</label>
