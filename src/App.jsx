@@ -533,12 +533,6 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
 
-  // TODO: retirer ce log de vérification une fois la commission SumUp validée sur les vraies données
-  useEffect(() => {
-    if (transactions.length === 0) return;
-    console.log("[SumUp check]", calculateSumUpFees(transactions, sumupRate));
-  }, [transactions, sumupRate]);
-
   useEffect(() => {
     const ch = supabase.channel("tx-changes")
       .on("postgres_changes", { event:"*", schema:"public", table:"transactions" }, () => loadTransactions())
